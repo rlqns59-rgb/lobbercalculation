@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사주 궁합 계산기</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f6fb;min-height:100vh;padding-bottom:48px}
+input,select,textarea,button{font-family:inherit}
+.card{background:white;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.07);margin-bottom:10px}
+.lbl{display:block;font-size:11px;color:#888;margin-bottom:4px;font-weight:500}
+.inp{width:100%;padding:8px 10px;border-radius:8px;border:1px solid #e0e0e0;font-size:13px;outline:none}
+.inp:focus{border-color:#1565c0}
+.btn-calc{width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#1565c0,#283593);color:white;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(21,101,192,.3);margin-bottom:12px}
+.btn-save{width:100%;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:white;font-size:13px;font-weight:700;cursor:pointer}
+.tab-btn{flex:1;padding:10px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent}
+.tab-btn.active{color:#1565c0;border-bottom-color:#1565c0}
+.tab-btn:not(.active){color:#aaa}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:1000;padding:0 20px}
+.overlay.show{display:flex}
+.mbox{background:white;border-radius:16px;padding:20px;width:100%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.dsel{flex:1;padding:6px 4px;border-radius:7px;border:1px solid #e0e0e0;font-size:12px;background:white}
+.esel{width:100%;padding:3px 2px;border-radius:5px;border:1px solid #e0e0e0;font-size:9px;background:white}
+.eselb{flex:1;padding:6px 4px;border-radius:6px;border:1px solid #e0e0e0;font-size:11px;background:white}
+/* 동기화 상태 표시 */
+#sync-badge{position:fixed;bottom:16px;right:16px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:500;transition:all .3s;pointer-events:none}
+</style>
+</head>
+<body>
+
+<!-- 비밀번호 화면 -->
+<div id="pw-screen" style="position:fixed;inset:0;background:linear-gradient(135deg,#dfe9f3 0%,#e8def5 100%);display:flex;align-items:center;justify-content:center;z-index:9999">
+  <div style="background:white;border-radius:22px;padding:32px 24px;width:260px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.12)">
+    <div style="font-size:34px;margin-bottom:10px">🔮</div>
+    <div style="font-size:24px;font-weight:800;color:#1a1a2e;margin-bottom:4px;letter-spacing:-.5px;line-height:1.2">사주 궁합<br>계산기</div>
+    <div style="font-size:11px;color:#bbb;margin-bottom:24px;margin-top:4px;letter-spacing:.5px">단자리 맞춤 점수표</div>
+    <input id="pw-input" type="password" placeholder="비밀번호 입력" maxlength="10"
+      style="width:100%;padding:9px 12px;border-radius:10px;border:1.5px solid #e0e0e0;font-size:15px;outline:none;text-align:center;letter-spacing:5px;margin-bottom:8px"
+      oninput="document.getElementById('pw-err').textContent=''"
+      onkeydown="if(event.key==='Enter')checkPw()">
+    <div id="pw-err" style="font-size:11px;color:#c62828;height:16px;margin-bottom:8px"></div>
+    <button onclick="checkPw()" style="width:100%;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#1565c0,#283593);color:white;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.5px">입장</button>
+  </div>
+</div>
+
+<!-- 로딩 화면 -->
+<div id="loading-screen" style="display:none;position:fixed;inset:0;background:rgba(255,255,255,.85);align-items:center;justify-content:center;z-index:8000;flex-direction:column;gap:12px">
+  <div style="font-size:32px">🔮</div>
+  <div style="font-size:13px;color:#888;font-weight:600">Firestore 연결 중…</div>
+</div>
+
+<div id="hdr" style="background:white;border-bottom:1px solid #eee;padding:10px 14px 8px"></div>
+<div style="background:white;border-bottom:1px solid #eee">
+  <div style="max-width:560px;margin:0 auto;display:flex">
+    <button class="tab-btn active" id="tab-input" onclick="switchTab('input')">✏️ 입력</button>
+    <button class="tab-btn" id="tab-dashboard" onclick="switchTab('dashboard')">📊 대시보드</button>
+  </div>
+</div>
+<div id="cwrap" style="max-width:560px;margin:0 auto;padding:12px"></div>
+
+<!-- 동기화 상태 뱃지 -->
+<div id="sync-badge" style="background:#e8f5e9;color:#2e7d32;display:none">✓ 저장됨</div>
+
+<!-- 내 대운/세운 모달 -->
+<div id="dw-ov" class="overlay" onclick="closeDw()">
+  <div class="mbox" style="max-width:420px" onclick="event.stopPropagation()">
+    <div style="font-size:14px;font-weight:700;color:#1a1a2e;margin-bottom:14px">✏️ 내 대운/세운 설정</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+      <div><div style="font-size:11px;color:#888;font-weight:600;margin-bottom:5px">현재 대운</div>
+        <div style="display:flex;gap:7px;align-items:center">
+          <select id="dw-dg" class="dsel" onchange="dwPrev()"></select>
+          <select id="dw-db" class="dsel" onchange="dwPrev()"></select>
+          <span id="dw-pd" style="font-size:12px;font-weight:700;color:#7b1fa2;min-width:52px"></span>
+        </div>
+      </div>
+      <div><div style="font-size:11px;color:#888;font-weight:600;margin-bottom:5px">2026년 세운</div>
+        <div style="display:flex;gap:7px;align-items:center">
+          <select id="dw-26g" class="dsel" onchange="dwPrev()"></select>
+          <select id="dw-26b" class="dsel" onchange="dwPrev()"></select>
+          <span id="dw-p26" style="font-size:12px;font-weight:700;color:#1565c0;min-width:52px"></span>
+        </div>
+      </div>
+      <div><div style="font-size:11px;color:#888;font-weight:600;margin-bottom:5px">2027년 세운</div>
+        <div style="display:flex;gap:7px;align-items:center">
+          <select id="dw-27g" class="dsel" onchange="dwPrev()"></select>
+          <select id="dw-27b" class="dsel" onchange="dwPrev()"></select>
+          <span id="dw-p27" style="font-size:12px;font-weight:700;color:#2e7d32;min-width:52px"></span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="saveDw()" style="flex:1;padding:10px;border-radius:8px;border:none;background:#1565c0;color:white;font-weight:700;cursor:pointer;font-size:13px">저장</button>
+      <button onclick="closeDw()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #e0e0e0;background:white;font-weight:600;cursor:pointer;font-size:13px">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, setDoc, onSnapshot, collection
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ── Firebase 초기화 ───────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyAFJzVeFUTGo5UY2eSXb7RtGo--4KUniO0",
+  authDomain: "rabbit-s-calculation.firebaseapp.com",
+  projectId: "rabbit-s-calculation",
+  storageBucket: "rabbit-s-calculation.firebasestorage.app",
+  messagingSenderId: "28543784592",
+  appId: "1:28543784592:web:65bbf80bc02278ddd82a15"
+};
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+
+// ── Firestore 문서 레퍼런스 ──────────────────────────────────────────────────
+const SAVED_REF = doc(db, "saju", "saju_v4");
+const MY_REF    = doc(db, "saju", "saju_my");
+
+// ── 전역 노출 ─────────────────────────────────────────────────────────────────
+window._db       = db;
+window._SAVED_REF = SAVED_REF;
+window._MY_REF   = MY_REF;
+window._setDoc   = setDoc;
+window._onSnapshot = onSnapshot;
+window._getDoc   = getDoc;
+
+// ── persist 함수 ──────────────────────────────────────────────────────────────
+window.persist = async () => {
+  try {
+    showSync('saving');
+    await setDoc(SAVED_REF, { data: JSON.stringify(S.saved) });
+    showSync('saved');
+  } catch(e) {
+    console.error('persist error:', e);
+    showSync('error');
+  }
+};
+
+window.persistMy = async () => {
+  try {
+    await setDoc(MY_REF, {
+      myDg: S.myDg, myDb: S.myDb,
+      my26g: S.my26g, my26b: S.my26b,
+      my27g: S.my27g, my27b: S.my27b
+    });
+  } catch(e) {
+    console.error('persistMy error:', e);
+  }
+};
+
+// ── 동기화 뱃지 ───────────────────────────────────────────────────────────────
+let syncTimer;
+window.showSync = (state) => {
+  const el = document.getElementById('sync-badge');
+  if (!el) return;
+  clearTimeout(syncTimer);
+  if (state === 'saving') {
+    el.style.display = 'block';
+    el.style.background = '#fff8e1';
+    el.style.color = '#f57f17';
+    el.textContent = '⏳ 저장 중…';
+  } else if (state === 'saved') {
+    el.style.display = 'block';
+    el.style.background = '#e8f5e9';
+    el.style.color = '#2e7d32';
+    el.textContent = '✓ 저장됨';
+    syncTimer = setTimeout(() => { el.style.display = 'none'; }, 2000);
+  } else if (state === 'synced') {
+    el.style.display = 'block';
+    el.style.background = '#e3f2fd';
+    el.style.color = '#1565c0';
+    el.textContent = '🔄 동기화됨';
+    syncTimer = setTimeout(() => { el.style.display = 'none'; }, 1500);
+  } else if (state === 'error') {
+    el.style.display = 'block';
+    el.style.background = '#ffebee';
+    el.style.color = '#c62828';
+    el.textContent = '⚠️ 저장 실패';
+    syncTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+};
+
+// ── 초기화 (Firestore 로드 + onSnapshot 구독) ─────────────────────────────────
+window._initApp = async () => {
+  const loading = document.getElementById('loading-screen');
+  loading.style.display = 'flex';
+
+  try {
+    // 내 대운/세운 로드
+    const mySnap = await getDoc(MY_REF);
+    if (mySnap.exists()) {
+      const d = mySnap.data();
+      Object.assign(S, {
+        myDg: d.myDg||'庚', myDb: d.myDb||'申',
+        my26g: d.my26g||'丙', my26b: d.my26b||'午',
+        my27g: d.my27g||'丁', my27b: d.my27b||'未'
+      });
+    }
+
+    // 저장 데이터 최초 로드
+    const savedSnap = await getDoc(SAVED_REF);
+    if (savedSnap.exists()) {
+      const raw = savedSnap.data().data;
+      S.saved = JSON.parse(raw).map(rec => {
+        const base = {t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',...rec};
+        return {...base, score: calcScore(base)};
+      });
+    } else {
+      // 최초 접속 시 시드 데이터 업로드
+      S.saved = SEED.map(r => ({...r, score: calcScore(r)}));
+      await window.persist();
+    }
+  } catch(e) {
+    console.error('초기 로드 오류:', e);
+    S.saved = SEED.map(r => ({...r, score: calcScore(r)}));
+  }
+
+  loading.style.display = 'none';
+  renderHeader();
+  renderContent();
+  setTimeout(() => document.getElementById('pw-input')?.focus(), 100);
+
+  // onSnapshot: 다른 기기에서 변경 시 실시간 반영
+  onSnapshot(SAVED_REF, (snap) => {
+    if (!snap.exists()) return;
+    try {
+      const newSaved = JSON.parse(snap.data().data).map(rec => {
+        const base = {t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',...rec};
+        return {...base, score: calcScore(base)};
+      });
+      // 현재 로컬과 다를 때만 반영 (무한루프 방지)
+      if (JSON.stringify(newSaved.map(r=>r.id)) !== JSON.stringify(S.saved.map(r=>r.id)) ||
+          JSON.stringify(newSaved) !== JSON.stringify(S.saved)) {
+        S.saved = newSaved;
+        showSync('synced');
+        renderContent();
+      }
+    } catch(e) { console.error('onSnapshot 파싱 오류:', e); }
+  });
+};
+</script>
+
+<script>
+// ── 상수 ─────────────────────────────────────────────────────────────────────
+const STEMS=['甲','乙','丙','丁','戊','己','庚','辛','壬','癸'];
+const BRCHS=['子','丑','寅','卯','辰','巳','午','未','申','酉','戌','亥'];
+const SKR={甲:'갑',乙:'을',丙:'병',丁:'정',戊:'무',己:'기',庚:'경',辛:'신',壬:'임',癸:'계'};
+const BKR={子:'자',丑:'축',寅:'인',卯:'묘',辰:'진',巳:'사',午:'오',未:'미',申:'신',酉:'유',戌:'술',亥:'해'};
+const OH={甲:'목',乙:'목',丙:'화',丁:'화',戊:'토',己:'토',庚:'금',辛:'금',壬:'수',癸:'수',子:'수',丑:'토',寅:'목',卯:'목',辰:'토',巳:'화',午:'화',未:'토',申:'금',酉:'금',戌:'토',亥:'수'};
+const OHC={목:{bg:'#e8f5e9',bd:'#4caf50',tx:'#1b5e20'},화:{bg:'#ffebee',bd:'#ef5350',tx:'#b71c1c'},토:{bg:'#fff8e1',bd:'#ffa726',tx:'#6d4c00'},금:{bg:'#f5f5f5',bd:'#9e9e9e',tx:'#424242'},수:{bg:'#e3f2fd',bd:'#42a5f5',tx:'#0d47a1'}};
+const SC1={甲:5,乙:5,丙:30,丁:-10,戊:18,己:20,庚:15,辛:15,壬:25,癸:10};
+const SC2={子:-15,丑:20,寅:15,卯:0,辰:20,巳:10,午:10,未:25,申:-20,酉:-30,戌:30,亥:25};
+const SC3={子:30,丑:25,寅:10,卯:10,辰:25,巳:-20,午:-20,未:-20,申:15,酉:15,戌:-20,亥:20};
+const SC4S={丙:5,壬:5},SC4B={子:5,亥:5,丑:5,辰:5,巳:-5,午:-5,未:-5,戌:-5};
+const NO1={丙:'병신합(丙辛合): 신금을 빛내는 태양. 가장 이상적인 합',壬:'도세주옥: 뜨거운 열기를 식히는 일등공신',己:'습토생금: 신약한 일간 생해줌',戊:'건토생금: 기토보다 건조해 다소 부족',庚:'비겁: 친구 같은 동료애, 든든한 버팀목',辛:'비견: 같은 금 기운, 든든한 버팀목',癸:'식신: 조후엔 좋으나 기운을 빼앗음',甲:'편재: 내가 다스려야 할 기운, 에너지 소모',乙:'정재: 재성이나 신약 시 부담',丁:'편관: 뜨거운 사주에 불을 더해 보석을 녹임'};
+const NO2={戌:'묘술합(卯戌合): 배우자 자리끼리 완벽히 합. 최고의 화합',亥:'해묘미 삼합: 가치관 일치, 정서적 유대감 매우 깊음',未:'해묘미 삼합: 정서적 일체감과 가치관 잘 맞음',辰:'정관 습토: 화기 흡수, 일간을 생해주는 귀한 땅',丑:'편관 습토: 화기 흡수, 일간을 생해주는 귀한 땅',寅:'목 기운: 묘목과 같은 목으로 대화 잘 통함',巳:'화기: 조후 불리하나 열정적인 관계 가능',午:'화기: 열정적이나 조열 심화 위험',子:'자묘형(子卯刑): 예의 문제, 사소한 다툼 잦음',申:'묘신원진: 이유없는 미움이나 집착 위험',酉:'묘유충(卯酉沖): 배우자 자리 직접 충격, 이별수 높음. 최악',卯:'비견 (기본값 0점)'};
+const NO3={子:'최고의 조후: 충 없이 완벽히 식힘',丑:'안정적 공급: 열기 식히며 금(金) 생해줌',辰:'안정적 공급: 열기 식히며 금(金) 생해줌',亥:'조후+충: 열기는 식히나 사해충 변동성 있음',申:'든든한 뿌리: 환경적으로 신약함 보완',酉:'든든한 뿌리: 환경적으로 신약함 보완',寅:'중립: 기운을 다소 빼앗지만 큰 해 없음',卯:'중립: 기운을 다소 빼앗지만 큰 해 없음',巳:'가중된 열기: 심리적 불안 유발',午:'가중된 열기: 심리적 불안 유발',未:'가중된 열기: 심리적 불안 유발',戌:'가중된 열기: 심리적 불안 유발'};
+const WATER=new Set(['壬','癸','子','亥']),FIRE=new Set(['丙','丁','巳','午']),GOLD=new Set(['庚','辛','申','酉']);
+
+const GRADES=[
+  {label:'천생연분 ⭐⭐⭐',min:90,color:'#7b1fa2',light:'#f3e5f5'},
+  {label:'우수 궁합 ⭐⭐',min:80,color:'#2e7d32',light:'#e8f5e9'},
+  {label:'보통 궁합 ⭐',min:75,color:'#1565c0',light:'#e3f2fd'},
+  {label:'주의 요망',min:30,color:'#e65100',light:'#fff3e0'},
+  {label:'비추천',min:-999,color:'#c62828',light:'#ffebee'},
+];
+const grd=s=>GRADES.find(g=>s>=g.min)||GRADES[GRADES.length-1];
+
+const SS_OPTS=['정재','편재','정관','정인','식신','편관','편인','비견','겁재','상관'];
+const SS_STEM_SCORE={정재:2,편재:1,정관:1,정인:1,식신:1,편관:1};
+const SS_BRANCH_SCORE={정재:3,편재:2,정관:2,정인:2,식신:1,편관:1};
+
+function toJDN(y,m,d){const a=Math.floor((14-m)/12),yr=y+4800-a,mo=m+12*a-3;return d+Math.floor((153*mo+2)/5)+365*yr+Math.floor(yr/4)-Math.floor(yr/100)+Math.floor(yr/400)-32045;}
+const REF=toJDN(1993,5,10);
+function getMBranch(m,d){const T=[[1,6,1],[2,4,2],[3,6,3],[4,5,4],[5,6,5],[6,6,6],[7,7,7],[8,7,8],[9,8,9],[10,8,10],[11,7,11],[12,7,0]];let i=0;for(const[tm,td,tb]of T)if(m>tm||(m===tm&&d>=td))i=tb;return i;}
+function calcManse(ds,ts=''){
+  if(!ds||ds.length!==8)return null;
+  const y=+ds.slice(0,4),m=+ds.slice(4,6),d=+ds.slice(6,8);
+  if(!y||m<1||m>12||d<1||d>31)return null;
+  const ay=(m<2||(m===2&&d<4))?y-1:y;
+  const ySi=(((6+(ay-1900))%10)+10)%10,yBi=(((ay-1900)%12)+12)%12;
+  const mBi=getMBranch(m,d),mBase=[2,4,6,8,0][ySi%5],mSi=(mBase+(mBi-2+12)%12)%10;
+  const diff=toJDN(y,m,d)-REF;
+  const dSi=((7+diff)%10+10)%10,dBi=((3+diff)%12+12)%12;
+  let hSi=null,hBi=null;
+  const tc=(ts||'').replace(/\D/g,'');
+  if(tc.length>=3){const hr=+tc.slice(0,2),mn=tc.length>=4?+tc.slice(2,4):0;if(hr<24){const mi=hr*60+mn;hBi=(mi>=1380||mi<60)?0:Math.floor((mi-60)/120)+1;hSi=([0,2,4,6,8,0,2,4,6,8][dSi]+hBi)%10;}}
+  return{연간:STEMS[ySi],연지:BRCHS[yBi],월간:STEMS[mSi],월지:BRCHS[mBi],일간:STEMS[dSi],일지:BRCHS[dBi],시간:hSi!==null?STEMS[hSi]:'',시지:hBi!==null?BRCHS[hBi]:''};
+}
+
+function calcDaewunStep(p){
+  const{dw_g_ss='',dw_b_ss='',s6_g_ss='',s6_b_ss='',s7_g_ss='',s7_b_ss=''}=p;
+  const hasData=!!(dw_g_ss||dw_b_ss||s6_g_ss||s6_b_ss||s7_g_ss||s7_b_ss);
+  if(!hasData)return{hasData:false,score:0,step:null};
+  const sg=k=>SS_STEM_SCORE[k]??0,bg=k=>SS_BRANCH_SCORE[k]??0;
+  const sdg=sg(dw_g_ss),sdb=bg(dw_b_ss);
+  const ss6g=sg(s6_g_ss),ss6b=bg(s6_b_ss);
+  const ss7g=sg(s7_g_ss),ss7b=bg(s7_b_ss);
+  const total=sdg+sdb+ss6g+ss6b+ss7g+ss7b;
+  const fmt=(k,s)=>k?`${k}(+${s})`:'미선택';
+  const note=`대운 천간${fmt(dw_g_ss,sdg)}/지지${fmt(dw_b_ss,sdb)} · 2026 천간${fmt(s6_g_ss,ss6g)}/지지${fmt(s6_b_ss,ss6b)} · 2027 천간${fmt(s7_g_ss,ss7g)}/지지${fmt(s7_b_ss,ss7b)}`;
+  return{hasData:true,score:total,step:{lbl:'7단계 · 세운/대운',sub:'십성 판정 (최대 +15)',score:total,note}};
+}
+
+function calcScore(p){
+  const all=[p.연간,p.연지,p.월간,p.월지,p.일간,p.일지,p.시간,p.시지].filter(Boolean);
+  const s1=SC1[p.일간]??0,s2=SC2[p.일지]??0,s3=SC3[p.월지]??0;
+  const s4s=SC4S[p.연간]??0,s4b=SC4B[p.연지]??0,s4=s4s+s4b;
+  const wc=all.filter(c=>WATER.has(c)).length,fc=all.filter(c=>FIRE.has(c)).length,gc=all.filter(c=>GOLD.has(c)).length;
+  const b1=wc>=3?5:0,b2=all.some(c=>c==='寅'||c==='午')?5:0,b3=all.includes('辰')?5:0,s5=b1+b2+b3;
+  const d1=wc>=1?10:0,d2=(gc>0&&wc===0)?5:0,d3=fc>=2?-10:0,s6=d1+d2+d3;
+  const dw=calcDaewunStep(p);
+  const steps=[
+    {lbl:'1단계 · 일간',sub:'정신적 조화 (30점)',score:s1,note:NO1[p.일간]||'해당없음'},
+    {lbl:'2단계 · 일지',sub:'속궁합/성격 (30점)',score:s2,note:NO2[p.일지]||'해당없음'},
+    {lbl:'3단계 · 월지',sub:'환경/조후 (30점)',score:s3,note:NO3[p.월지]||'해당없음'},
+    {lbl:'4단계 · 연간/연지',sub:'가문/뿌리 (10점)',score:s4,note:[s4s?`연간 +${s4s}`:'',s4b?`연지 ${s4b>0?'+':''}${s4b}`:''].filter(Boolean).join(' / ')||'해당없음'},
+    {lbl:'5단계 · 가산점',sub:'귀인/특수',score:s5,note:[b1?'수기 3개+(+5)':'',b2?'천을귀인 인·오(+5)':'',b3?'천덕귀인 진(+5)':''].filter(Boolean).join(' · ')||'해당없음'},
+    {lbl:'6단계 · 대운보정',sub:'원국 기반',score:s6,note:[d1?'수기 보유(+10)':'',d2?'금기+수기無(+5)':'',d3?'화기 2개+(-10)':''].filter(Boolean).join(' · ')||'해당없음'},
+  ];
+  if(dw.hasData)steps.push(dw.step);
+  return{total:s1+s2+s3+s4+s5+s6+(dw.hasData?dw.score:0),steps};
+}
+
+function mkSeed(id,name,date,연간,연지,월간,월지,일간,일지,시간,시지){
+  return{id,name,date,연간,연지,월간,월지,일간,일지,시간,시지,t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',memo:'',score:{total:0,steps:[]}};
+}
+const SEED=[
+  mkSeed(1,'김동욱','19911007','辛','未','','酉','庚','戌','',''),
+  mkSeed(2,'이현준','19911116','辛','未','','亥','庚','寅','',''),
+  mkSeed(3,'강인호','19930129','壬','申','','丑','庚','戌','',''),
+  mkSeed(4,'김민호','19900913','庚','午','','酉','辛','巳','',''),
+  mkSeed(5,'이현수','19881214','戊','辰','','子','癸','卯','',''),
+  mkSeed(6,'전해성','19910312','辛','未','','卯','辛','巳','',''),
+  mkSeed(7,'강기성','19880409','戊','辰','','辰','甲','午','',''),
+  mkSeed(8,'박지훈','19941213','甲','戌','','子','癸','酉','',''),
+];
+
+const EMPTY={name:'',연간:'',연지:'',월간:'',월지:'',일간:'',일지:'',시간:'',시지:'',t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:''};
+let S={
+  tab:'input',form:{...EMPTY},dateIn:'',timeIn:'',res:null,
+  saved:[],filt:null,editId:null,
+  sortKey:'score',sortDir:'desc',
+  myDg:'庚',myDb:'申',my26g:'丙',my26b:'午',my27g:'丁',my27b:'未',
+};
+
+// persist / persistMy는 모듈 script에서 window.persist / window.persistMy로 정의됨
+// 하지만 비동기 모듈 로드 전 호출 방지를 위한 fallback
+if (!window.persist) window.persist = async () => {};
+if (!window.persistMy) window.persistMy = async () => {};
+
+const fmtDate=s=>{const c=(s||'').replace(/\D/g,'');return c.length===8?`${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`:s;};
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function cbHTML(ch,sz=40){
+  const oh=ch&&OH[ch],st=oh?OHC[oh]:null;
+  const bg=st?.bg||'#f5f5f5',bd=st?.bd||'#e0e0e0',tx=st?.tx||'#ccc';
+  return`<div style="width:${sz}px;height:${sz}px;border-radius:${(sz*.22).toFixed(0)}px;background:${bg};border:2px solid ${bd};display:inline-flex;align-items:center;justify-content:center;font-size:${(sz*.52).toFixed(0)}px;font-weight:700;color:${tx};flex-shrink:0;vertical-align:middle">${esc(ch)||'?'}</div>`;
+}
+function mkSel(fk,opts,ph){
+  const val=S.form[fk]||'';
+  return`<select data-field="${fk}" style="flex:1;padding:5px 3px;border-radius:6px;border:1px solid #e0e0e0;font-size:10px;background:white">${ph}<option value="">-</option>${opts.map(([v,l])=>`<option value="${v}"${val===v?' selected':''}>${l}</option>`).join('')}</select>`;
+}
+const stemOpts=STEMS.map(s=>[s,`${SKR[s]}(${s})`]);
+const branchOpts=BRCHS.map(b=>[b,`${BKR[b]}(${b})`]);
+const sPH='<option value="">천간</option>',bPH='<option value="">지지</option>';
+
+function stemSelE(fk,cv){return`<select id="ed-${fk}" onchange="edSel('${fk}')" class="esel"><option value="">천간</option>${STEMS.map(s=>`<option value="${s}"${cv===s?' selected':''}>${SKR[s]}(${s})</option>`).join('')}</select>`;}
+function branchSelE(fk,cv){return`<select id="ed-${fk}" onchange="edSel('${fk}')" class="esel"><option value="">지지</option>${BRCHS.map(b=>`<option value="${b}"${cv===b?' selected':''}>${BKR[b]}(${b})</option>`).join('')}</select>`;}
+function ssStemSel(id,cv){return`<select id="ed-${id}" onchange="edSsUpdate()" class="eselb"><option value="">선택</option>${SS_OPTS.map(nm=>`<option value="${nm}"${cv===nm?' selected':''}>${nm}(+${SS_STEM_SCORE[nm]??0})</option>`).join('')}</select>`;}
+function ssBranchSel(id,cv){return`<select id="ed-${id}" onchange="edSsUpdate()" class="eselb"><option value="">선택</option>${SS_OPTS.map(nm=>`<option value="${nm}"${cv===nm?' selected':''}>${nm}(+${SS_BRANCH_SCORE[nm]??0})</option>`).join('')}</select>`;}
+function ilganSelE(id,cv){return`<select id="ed-${id}" class="eselb"><option value="">일간 선택</option>${STEMS.map(s=>`<option value="${s}"${cv===s?' selected':''}>${SKR[s]}(${s}) · ${OH[s]||''}</option>`).join('')}</select>`;}
+function mkSsStemSel(fk){const val=S.form[fk]||'';return`<select data-field="${fk}" style="flex:1;padding:5px 3px;border-radius:6px;border:1px solid #e0e0e0;font-size:10px;background:white"><option value="">선택</option>${SS_OPTS.map(nm=>`<option value="${nm}"${val===nm?' selected':''}>${nm}(+${SS_STEM_SCORE[nm]??0})</option>`).join('')}</select>`;}
+function mkSsBranchSel(fk){const val=S.form[fk]||'';return`<select data-field="${fk}" style="flex:1;padding:5px 3px;border-radius:6px;border:1px solid #e0e0e0;font-size:10px;background:white"><option value="">선택</option>${SS_OPTS.map(nm=>`<option value="${nm}"${val===nm?' selected':''}>${nm}(+${SS_BRANCH_SCORE[nm]??0})</option>`).join('')}</select>`;}
+function mkIlganSel(fk){const val=S.form[fk]||'';return`<select data-field="${fk}" style="flex:1;padding:5px 3px;border-radius:6px;border:1px solid #e0e0e0;font-size:10px;background:white"><option value="">일간 선택</option>${STEMS.map(s=>`<option value="${s}"${val===s?' selected':''}>${SKR[s]}(${s}) · ${OH[s]||''}</option>`).join('')}</select>`;}
+
+function ssRowInput(label,bgColor,borderColor,gFk,bFk){
+  const sg=SS_STEM_SCORE[S.form[gFk]]??0,sb=SS_BRANCH_SCORE[S.form[bFk]]??0;
+  return`<div style="background:${bgColor};border-radius:8px;padding:8px 10px;margin-bottom:7px">
+    <div style="font-size:10px;color:${borderColor};font-weight:700;margin-bottom:6px">${label}
+      <span style="font-size:9px;font-weight:400;color:${sg+sb>0?borderColor:'#bbb'}">&nbsp;소계: +${sg+sb}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <div style="flex:0 0 34px;font-size:10px;color:#888">천간</div>${mkSsStemSel(gFk)}
+      <span style="font-size:11px;font-weight:700;color:${sg>0?borderColor:'#bbb'};min-width:26px">+${sg}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="flex:0 0 34px;font-size:10px;color:#888">지지</div>${mkSsBranchSel(bFk)}
+      <span style="font-size:11px;font-weight:700;color:${sb>0?borderColor:'#bbb'};min-width:26px">+${sb}</span>
+    </div>
+  </div>`;
+}
+
+function pcolHTML(lbl,sub,sk,bk){
+  return`<div style="flex:1;min-width:0;text-align:center">
+    <div style="font-size:10px;font-weight:600;color:#555;margin-bottom:1px">${lbl}</div>
+    <div style="font-size:8px;color:#bbb;margin-bottom:7px">${sub}</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;margin-bottom:7px">
+      ${cbHTML(S.form[sk],40)}<br>${cbHTML(S.form[bk],40)}
+    </div>
+    ${mkSel(sk,stemOpts,sPH)}<div style="height:3px"></div>${mkSel(bk,branchOpts,bPH)}
+  </div>`;
+}
+
+function buildDwInput(){
+  const tot=[
+    SS_STEM_SCORE[S.form.dw_g_ss]??0,SS_BRANCH_SCORE[S.form.dw_b_ss]??0,
+    SS_STEM_SCORE[S.form.s6_g_ss]??0,SS_BRANCH_SCORE[S.form.s6_b_ss]??0,
+    SS_STEM_SCORE[S.form.s7_g_ss]??0,SS_BRANCH_SCORE[S.form.s7_b_ss]??0,
+  ].reduce((a,b)=>a+b,0);
+  return`<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:#222">상대방 세운/대운 십성</div>
+      ${tot>0?`<span style="font-size:11px;font-weight:800;color:#7b1fa2">7단계 +${tot}점</span>`:`<span style="font-size:9px;color:#bbb">최대 +15점</span>`}
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+      <div style="flex:0 0 56px;font-size:11px;color:#888;font-weight:500">상대방 일간</div>
+      ${mkIlganSel('t_ilgan')}
+    </div>
+    ${ssRowInput('대운','#f8f4ff','#7b1fa2','dw_g_ss','dw_b_ss')}
+    ${ssRowInput('2026 세운','#eff4ff','#1565c0','s6_g_ss','s6_b_ss')}
+    ${ssRowInput('2027 세운','#effaf2','#2e7d32','s7_g_ss','s7_b_ss')}
+  </div>`;
+}
+
+const scoreColor=v=>v>0?'#2e7d32':v<0?'#c62828':'#bbb';
+const sgnStr=v=>(v>0?'+':'')+v;
+
+function buildResult(res){
+  const g=grd(res.total);
+  const mx=res.steps.length>6?140:125;
+  const pct=Math.max(0,Math.min(100,(res.total/mx)*100)).toFixed(1);
+  return`<div class="card" style="border-top:3px solid ${g.color}">
+    <div style="text-align:center;padding:6px 0 16px">
+      <div style="font-size:56px;font-weight:900;color:${g.color};line-height:1">${res.total}</div>
+      <div style="font-size:10px;color:#bbb;margin:3px 0 10px">종합 점수 (최대 ${mx}점)</div>
+      <div style="height:8px;background:#f5f5f5;border-radius:4px;overflow:hidden;margin:0 16px 12px">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${g.color}66,${g.color});border-radius:4px"></div>
+      </div>
+      <span style="display:inline-block;padding:5px 20px;border-radius:20px;background:${g.light};color:${g.color};font-size:14px;font-weight:700">${g.label}</span>
+    </div>
+    <div style="border-top:1px solid #f5f5f5;padding-top:2px">
+      ${res.steps.map((st,i)=>`
+      <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid #fafafa;align-items:flex-start${i===6?';background:#fafafa;margin:0 -4px;padding:8px 4px;border-radius:6px':''}">
+        <div style="flex:0 0 115px"><div style="font-size:11px;font-weight:700;color:${i===6?'#7b1fa2':'#333'}">${st.lbl}</div><div style="font-size:9px;color:#bbb">${st.sub}</div></div>
+        <div style="flex:1;font-size:10px;color:#888;line-height:1.5">${esc(st.note)}</div>
+        <div style="font-weight:700;font-size:14px;color:${scoreColor(st.score)};min-width:32px;text-align:right">${sgnStr(st.score)}</div>
+      </div>`).join('')}
+      <div style="display:flex;justify-content:flex-end;padding:8px 0 4px;font-size:14px;font-weight:800;color:#1a1a2e">합계 ${res.total}점</div>
+    </div>
+    <button class="btn-save" onclick="onSave()">💾 대시보드에 저장</button>
+  </div>`;
+}
+
+function ssEditRow(label,bgColor,bdColor,gId,bId,gVal,bVal){
+  const sg=SS_STEM_SCORE[gVal]??0,sb=SS_BRANCH_SCORE[bVal]??0;
+  return`<div style="background:${bgColor};border-radius:8px;padding:9px 10px;margin-bottom:7px">
+    <div style="font-size:10px;color:${bdColor};font-weight:700;margin-bottom:6px">${label}
+      <span id="${gId}-sub" style="font-size:10px;font-weight:400;color:${sg+sb>0?bdColor:'#bbb'}">&nbsp;+${sg+sb}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <div style="flex:0 0 34px;font-size:10px;color:#888">천간</div>
+      ${ssStemSel(gId,gVal)}
+      <span id="${gId}-score" style="font-size:12px;font-weight:700;color:${sg>0?bdColor:'#bbb'};min-width:26px">+${sg}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="flex:0 0 34px;font-size:10px;color:#888">지지</div>
+      ${ssBranchSel(bId,bVal)}
+      <span id="${bId}-score" style="font-size:12px;font-weight:700;color:${sb>0?bdColor:'#bbb'};min-width:26px">+${sb}</span>
+    </div>
+  </div>`;
+}
+
+function buildInlineEditForm(r){
+  const g=grd(r.score.total);
+  const dw7=calcDaewunStep(r);
+  const dwtot=dw7.score;
+  return`<div style="border-top:1px solid #e8e8e8;padding:12px 14px;background:#fafafa">
+    <div style="padding:9px 12px;background:${g.light};border-radius:10px;margin-bottom:12px;border:1px solid ${g.color}33">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+        <span style="font-size:24px;font-weight:900;color:${g.color}">${r.score.total}</span>
+        <span style="font-size:12px;font-weight:700;color:${g.color}">${g.label}</span>
+        ${dwtot>0?`<span style="font-size:11px;color:#7b1fa2;margin-left:auto">7단계 +${dwtot}</span>`:''}
+      </div>
+      <div id="seun-summary" style="font-size:9px;color:#777">
+        대운+${(SS_STEM_SCORE[r.dw_g_ss]??0)+(SS_BRANCH_SCORE[r.dw_b_ss]??0)} · 2026세운+${(SS_STEM_SCORE[r.s6_g_ss]??0)+(SS_BRANCH_SCORE[r.s6_b_ss]??0)} · 2027세운+${(SS_STEM_SCORE[r.s7_g_ss]??0)+(SS_BRANCH_SCORE[r.s7_b_ss]??0)}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div style="flex:1"><label class="lbl">이름</label><input id="ed-name" class="inp" value="${esc(r.name)}"></div>
+      <div style="flex:1.5"><label class="lbl">생년월일 (YYYYMMDD)</label>
+        <div style="display:flex;gap:5px">
+          <input id="ed-date" class="inp" value="${esc(r.date)}" maxlength="8" placeholder="19930129">
+          <button onclick="edAutoCalc()" style="padding:8px;border-radius:8px;border:1px solid #1565c0;background:#e3f2fd;color:#1565c0;font-size:10px;cursor:pointer;font-weight:600;white-space:nowrap">만세력</button>
+        </div>
+      </div>
+    </div>
+    <label class="lbl" style="margin-bottom:6px">사주팔자</label>
+    <div style="display:flex;gap:5px;margin-bottom:12px">
+      ${[['시주','자식·말년','sg','sb',r.시간||'',r.시지||''],
+         ['일주 ✦','본인·배우자','dg','db',r.일간||'',r.일지||''],
+         ['월주','사회·부모','mg','mb',r.월간||'',r.월지||''],
+         ['연주','국가·조상','yg','yb',r.연간||'',r.연지||'']].map(([lbl,sub,gk,bk,gv,bv])=>`
+      <div style="flex:1;text-align:center">
+        <div style="font-size:9px;font-weight:600;color:#555;margin-bottom:2px">${lbl}</div>
+        <div style="font-size:7px;color:#ccc;margin-bottom:4px">${sub}</div>
+        <div id="ed-chip-${gk}" style="display:flex;justify-content:center;margin-bottom:2px">${cbHTML(gv,30)}</div>
+        <div id="ed-chip-${bk}" style="display:flex;justify-content:center;margin-bottom:4px">${cbHTML(bv,30)}</div>
+        ${stemSelE(gk,gv)}<div style="height:2px"></div>${branchSelE(bk,bv)}
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+      <div style="flex:0 0 56px;font-size:11px;color:#888;font-weight:500">상대방 일간</div>
+      ${ilganSelE('t_ilgan',r.t_ilgan||'')}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:#555">세운/대운 십성 (7단계)</div>
+      <div id="ss7-total" style="font-size:12px;font-weight:800;color:${dwtot>0?'#7b1fa2':'#bbb'}">합계 +${dwtot}</div>
+    </div>
+    ${ssEditRow('대운','#f8f4ff','#7b1fa2','dw_g_ss','dw_b_ss',r.dw_g_ss||'',r.dw_b_ss||'')}
+    ${ssEditRow('2026 세운','#eff4ff','#1565c0','s6_g_ss','s6_b_ss',r.s6_g_ss||'',r.s6_b_ss||'')}
+    ${ssEditRow('2027 세운','#effaf2','#2e7d32','s7_g_ss','s7_b_ss',r.s7_g_ss||'',r.s7_b_ss||'')}
+    <label class="lbl" style="margin-top:2px">메모</label>
+    <textarea id="ed-memo" placeholder="첫 만남, 특이사항 등…" style="width:100%;height:60px;padding:8px 10px;border-radius:8px;border:1px solid #e0e0e0;font-size:12px;resize:none;line-height:1.5;outline:none;margin-top:4px;background:white">${esc(r.memo||'')}</textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="saveInlineEdit()" style="flex:1;padding:10px;border-radius:8px;border:none;background:#1565c0;color:white;font-weight:700;cursor:pointer;font-size:13px">저장</button>
+      <button onclick="cancelInlineEdit()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #e0e0e0;background:white;font-weight:600;cursor:pointer;font-size:13px">취소</button>
+      <button onclick="onDel(${r.id})" style="padding:10px 13px;border-radius:8px;border:1px solid #ffcdd2;background:#fff5f5;color:#c62828;font-size:13px;cursor:pointer">🗑️</button>
+    </div>
+  </div>`;
+}
+
+function buildCard(r){
+  const g=grd(r.score.total),isEd=S.editId===r.id;
+  const hasSs=!!(r.dw_g_ss||r.s6_g_ss||r.s7_g_ss);
+  return`<div style="background:white;border-radius:14px;overflow:hidden;margin-bottom:7px;border:1px solid ${isEd?g.color:'#f0f0f0'};box-shadow:0 2px 8px rgba(0,0,0,.07)">
+    <div onclick="toggleEdit(${r.id})" style="display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;height:60px">
+      <span style="flex:0 0 auto;font-size:9px;font-weight:700;color:${g.color};background:${g.light};padding:2px 6px;border-radius:7px;white-space:nowrap">${g.label}</span>
+      <div style="flex:0 0 34px;font-size:19px;font-weight:900;color:${g.color};text-align:right;line-height:1">${r.score.total}</div>
+      <div style="flex:1;font-weight:600;font-size:14px;color:#1a1a2e;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-left:4px">${esc(r.name)}</div>
+      <div style="flex:0 0 auto;display:flex;gap:2px">${cbHTML(r.일간,25)}${cbHTML(r.일지,25)}</div>
+      ${hasSs?`<span style="font-size:8px;color:#7b1fa2;background:#f3e5f5;padding:2px 4px;border-radius:4px;flex:0 0 auto">세운✓</span>`:''}
+      <span style="font-size:13px;color:${r.memo?'#1565c0':'#d0d0d0'};flex:0 0 auto">📝</span>
+      <span style="font-size:10px;color:#bbb;flex:0 0 auto">${isEd?'▲':'▼'}</span>
+    </div>
+    ${isEd?buildInlineEditForm(r):''}
+  </div>`;
+}
+
+function buildInputTab(){
+  const autoOk=S.dateIn.length===8&&!!calcManse(S.dateIn);
+  return`
+  <div class="card">
+    <div style="font-size:12px;font-weight:700;color:#222;margin-bottom:10px">기본 정보</div>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label class="lbl">이름</label><input id="f-name" class="inp" value="${esc(S.form.name)}" placeholder="이름" oninput="S.form.name=this.value"></div>
+      <div style="flex:1.4"><label class="lbl">생년월일 (YYYYMMDD)</label><input id="f-date" class="inp" value="${esc(S.dateIn)}" placeholder="예: 19930129" maxlength="8" oninput="onDateInput(this.value)"></div>
+      <div style="flex:.9"><label class="lbl">시간 (HHmm, 선택)</label><input id="f-time" class="inp" value="${esc(S.timeIn)}" placeholder="예: 0445" maxlength="4" oninput="onTimeInput(this.value)"></div>
+    </div>
+    ${autoOk?`<div style="margin-top:7px;font-size:9px;color:#2e7d32;background:#e8f5e9;padding:3px 10px;border-radius:7px;display:inline-block">✓ 만세력 자동계산됨</div>`:''}
+  </div>
+  <div class="card">
+    <div style="font-size:12px;font-weight:700;color:#222;margin-bottom:2px">사주팔자 입력</div>
+    <div style="font-size:9px;color:#bbb;margin-bottom:11px">* 일주(천간·지지)와 월지는 점수 계산에 필수</div>
+    <div style="display:flex;gap:6px">
+      ${pcolHTML('시주','자식·말년','시간','시지')}
+      ${pcolHTML('일주 ✦','본인·배우자','일간','일지')}
+      ${pcolHTML('월주','사회·부모','월간','월지')}
+      ${pcolHTML('연주','국가·조상','연간','연지')}
+    </div>
+  </div>
+  ${buildDwInput()}
+  <div class="card" style="padding:12px 14px">
+    <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">📊 내 궁합 점수 기준</div>
+    <div style="display:flex;gap:4px">
+      ${GRADES.map((g,i)=>{const r=['90+','80~89','75~79','30~74','~29'];return`<div style="flex:1;text-align:center;background:${g.light};border-radius:8px;padding:7px 3px;border:1px solid ${g.color}33"><div style="font-size:9px;font-weight:800;color:${g.color};line-height:1.3">${g.label}</div><div style="font-size:8px;color:${g.color};opacity:.75;margin-top:1px">${r[i]}</div></div>`;}).join('')}
+    </div>
+  </div>
+  <button class="btn-calc" onclick="onCalc()">🔮 궁합 계산하기</button>
+  ${S.res?buildResult(S.res):''}`;
+}
+
+function buildDashboard(){
+  const filtData=S.saved.filter(r=>!S.filt||grd(r.score.total).label===S.filt);
+  const sorted=[...filtData].sort((a,b)=>{
+    if(S.sortKey==='name')return S.sortDir==='asc'?a.name.localeCompare(b.name):b.name.localeCompare(a.name);
+    const va=S.sortKey==='grade'?GRADES.findIndex(g=>a.score.total>=g.min):a.score.total;
+    const vb=S.sortKey==='grade'?GRADES.findIndex(g=>b.score.total>=g.min):b.score.total;
+    return S.sortDir==='desc'?vb-va:va-vb;
+  });
+  return`
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:14px;font-weight:700;color:#1a1a2e">저장 <span style="color:#1565c0;font-weight:900">${S.saved.length}</span>명</div>
+    ${S.saved.length?`<button onclick="onCSV()" style="padding:5px 12px;border-radius:7px;border:1px solid #1565c0;background:white;color:#1565c0;font-size:11px;font-weight:600;cursor:pointer">📥 CSV</button>`:''}
+  </div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+    ${GRADES.map(g=>`<button onclick="toggleFilt('${g.label}')" style="padding:3px 9px;border-radius:13px;border:1.5px solid ${g.color};background:${S.filt===g.label?g.color:'white'};color:${S.filt===g.label?'white':g.color};font-size:10px;font-weight:600;cursor:pointer">${g.label}</button>`).join('')}
+  </div>
+  <div style="display:flex;gap:5px;margin-bottom:10px;align-items:center">
+    <span style="font-size:10px;color:#bbb">정렬:</span>
+    ${[['score','점수'],['name','이름'],['grade','등급']].map(([k,l])=>`<button onclick="toggleSort('${k}')" style="padding:3px 9px;border-radius:10px;border:1px solid ${S.sortKey===k?'#1565c0':'#e0e0e0'};background:${S.sortKey===k?'#e3f2fd':'white'};color:${S.sortKey===k?'#1565c0':'#888'};font-size:10px;font-weight:600;cursor:pointer">${l}${S.sortKey===k?(S.sortDir==='desc'?' ↓':' ↑'):''}</button>`).join('')}
+    <span style="font-size:9px;color:#ccc;margin-left:auto">${S.filt?`${S.filt} ${filtData.length}명`:`전체 ${S.saved.length}명`}</span>
+  </div>
+  ${sorted.length===0
+    ?`<div class="card" style="text-align:center;padding:48px 16px"><div style="font-size:44px;margin-bottom:10px">🔮</div><div style="color:#bbb;font-size:13px">저장된 결과가 없습니다</div></div>`
+    :sorted.map(r=>buildCard(r)).join('')}`;
+}
+
+function renderHeader(){
+  document.getElementById('hdr').innerHTML=`<div style="max-width:560px;margin:0 auto">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:20px">🔮</span>
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#1a1a2e">사주 궁합 계산기</div>
+          <div style="font-size:9px;color:#bbb">단자리 (辛卯일주) 맞춤 점수표</div>
+        </div>
+      </div>
+      <button onclick="openDw()" style="padding:5px 10px;border-radius:8px;border:1px solid #7b1fa2;background:#f3e5f5;color:#7b1fa2;font-size:10px;font-weight:600;cursor:pointer;flex-shrink:0">대운/세운 ✏️</button>
+    </div>
+    <div style="display:flex;gap:5px;align-items:center;margin-top:7px;padding-top:7px;border-top:1px solid #f5f5f5;flex-wrap:wrap">
+      <span style="font-size:9px;color:#bbb">내 사주 →</span>
+      ${[['시','庚','寅'],['일','辛','卯'],['월','丁','巳'],['연','癸','酉']].map(([l,s,b])=>`
+      <div style="display:flex;align-items:center;gap:1px"><span style="font-size:8px;color:#ccc">${l}</span>${cbHTML(s,21)}${cbHTML(b,21)}</div>`).join('')}
+      <span style="font-size:9px;color:#ccc;margin:0 3px">|</span>
+      <span style="font-size:9px;color:#9c27b0">대운</span>${cbHTML(S.myDg,21)}${cbHTML(S.myDb,21)}
+      <span style="font-size:9px;color:#1565c0">26</span>${cbHTML(S.my26g,21)}${cbHTML(S.my26b,21)}
+      <span style="font-size:9px;color:#2e7d32">27</span>${cbHTML(S.my27g,21)}${cbHTML(S.my27b,21)}
+    </div>
+  </div>`;
+}
+
+function renderContent(){
+  const fw=document.activeElement,fid=fw?.id,fdf=fw?.dataset?.field,fsel=fw?.selectionStart;
+  document.getElementById('cwrap').innerHTML=S.tab==='input'?buildInputTab():buildDashboard();
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    el.addEventListener('change',e=>{S.form[e.target.dataset.field]=e.target.value;renderContent();});
+  });
+  if(fid){const el=document.getElementById(fid);if(el){el.focus();if(fsel!=null)try{el.setSelectionRange(fsel,fsel);}catch{}}}
+  else if(fdf){const el=document.querySelector(`[data-field="${fdf}"]`);if(el)el.focus();}
+}
+
+// ── 이벤트 ────────────────────────────────────────────────────────────────────
+function checkPw(){
+  const pw=document.getElementById('pw-input').value;
+  if(pw==='0510'){document.getElementById('pw-screen').style.display='none';document.getElementById('pw-input').value='';}
+  else{document.getElementById('pw-err').textContent='비밀번호가 맞지 않습니다';document.getElementById('pw-input').value='';document.getElementById('pw-input').focus();setTimeout(()=>{const e=document.getElementById('pw-err');if(e)e.textContent='';},2000);}
+}
+
+function switchTab(t){S.tab=t;S.res=null;S.editId=null;document.getElementById('tab-input').className='tab-btn'+(t==='input'?' active':'');document.getElementById('tab-dashboard').className='tab-btn'+(t==='dashboard'?' active':'');renderContent();}
+function onDateInput(v){S.dateIn=v.replace(/\D/g,'').slice(0,8);if(S.dateIn.length===8){const r=calcManse(S.dateIn,S.timeIn);if(r)Object.assign(S.form,r);}renderContent();}
+function onTimeInput(v){S.timeIn=v.replace(/\D/g,'').slice(0,4);if(S.dateIn.length===8){const r=calcManse(S.dateIn,S.timeIn);if(r)Object.assign(S.form,r);}renderContent();}
+function onCalc(){if(!S.form.일간||!S.form.일지||!S.form.월지){alert('일주(천간·지지)와 월지는 필수');return;}S.res=calcScore(S.form);renderContent();}
+
+function onSave(){
+  if(!S.res)return;
+  const rec={id:Date.now(),name:S.form.name||'무명',date:S.dateIn,...S.form,memo:'',score:S.res};
+  S.saved=[...S.saved,rec];
+  window.persist();
+  S.res=null;S.form={...EMPTY};S.dateIn='';S.timeIn='';
+  switchTab('dashboard');
+}
+
+function onDel(id){
+  if(!confirm('삭제하시겠습니까?'))return;
+  S.saved=S.saved.filter(r=>r.id!==id);
+  window.persist();
+  if(S.editId===id)S.editId=null;
+  renderContent();
+}
+
+function toggleEdit(id){S.editId=S.editId===id?null:id;renderContent();}
+function edSel(key){
+  const val=document.getElementById(`ed-${key}`)?.value;
+  const chip=document.getElementById(`ed-chip-${key}`);
+  if(chip)chip.innerHTML=cbHTML(val||'',30);
+}
+function edSsUpdate(){
+  const sg=id=>{const v=document.getElementById(`ed-${id}`)?.value||'';return SS_STEM_SCORE[v]??0;};
+  const bg=id=>{const v=document.getElementById(`ed-${id}`)?.value||'';return SS_BRANCH_SCORE[v]??0;};
+  const scores={dw_g_ss:sg('dw_g_ss'),dw_b_ss:bg('dw_b_ss'),s6_g_ss:sg('s6_g_ss'),s6_b_ss:bg('s6_b_ss'),s7_g_ss:sg('s7_g_ss'),s7_b_ss:bg('s7_b_ss')};
+  let total=0;
+  Object.entries(scores).forEach(([id,s])=>{
+    total+=s;
+    const el=document.getElementById(`${id}-score`);
+    if(el){el.textContent=`+${s}`;el.style.color=s>0?'#2e7d32':'#bbb';}
+  });
+  [['dw_g_ss','dw_b_ss'],['s6_g_ss','s6_b_ss'],['s7_g_ss','s7_b_ss']].forEach(([g,b])=>{
+    const sub=document.getElementById(`${g}-sub`);
+    const t=scores[g]+scores[b];
+    if(sub){sub.textContent=` +${t}`;sub.style.color=t>0?sub.style.color:'#bbb';}
+  });
+  const tot=document.getElementById('ss7-total');
+  if(tot){tot.textContent=`합계 +${total}`;tot.style.color=total>0?'#7b1fa2':'#bbb';}
+  const sum=document.getElementById('seun-summary');
+  if(sum)sum.textContent=`대운+${scores.dw_g_ss+scores.dw_b_ss} · 2026세운+${scores.s6_g_ss+scores.s6_b_ss} · 2027세운+${scores.s7_g_ss+scores.s7_b_ss}`;
+}
+
+function edAutoCalc(){
+  const dt=(document.getElementById('ed-date')?.value||'').replace(/\D/g,'').slice(0,8);
+  if(dt.length!==8)return;
+  const r=calcManse(dt);if(!r)return;
+  const m={sg:r.시간,sb:r.시지,dg:r.일간,db:r.일지,mg:r.월간,mb:r.월지,yg:r.연간,yb:r.연지};
+  Object.entries(m).forEach(([k,v])=>{const el=document.getElementById(`ed-${k}`);if(el){el.value=v||'';edSel(k);}});
+}
+
+function saveInlineEdit(){
+  const id=S.editId;if(!id)return;
+  const v=k=>document.getElementById(`ed-${k}`)?.value||'';
+  const upd={
+    name:document.getElementById('ed-name')?.value||'무명',
+    date:(document.getElementById('ed-date')?.value||'').replace(/\D/g,'').slice(0,8),
+    시간:v('sg'),시지:v('sb'),일간:v('dg'),일지:v('db'),
+    월간:v('mg'),월지:v('mb'),연간:v('yg'),연지:v('yb'),
+    t_ilgan:v('t_ilgan'),
+    dw_g_ss:v('dw_g_ss'),dw_b_ss:v('dw_b_ss'),
+    s6_g_ss:v('s6_g_ss'),s6_b_ss:v('s6_b_ss'),
+    s7_g_ss:v('s7_g_ss'),s7_b_ss:v('s7_b_ss'),
+    memo:document.getElementById('ed-memo')?.value||'',
+  };
+  S.saved=S.saved.map(r=>{if(r.id!==id)return r;const u={...r,...upd};return{...u,score:calcScore(u)};});
+  S.editId=null;
+  window.persist();
+  renderContent();
+}
+function cancelInlineEdit(){S.editId=null;renderContent();}
+function toggleFilt(lbl){S.filt=S.filt===lbl?null:lbl;renderContent();}
+function toggleSort(k){if(S.sortKey===k)S.sortDir=S.sortDir==='desc'?'asc':'desc';else{S.sortKey=k;S.sortDir='desc';}renderContent();}
+
+function fillDwSels(dg,db,g26,b26,g27,b27){
+  ['dw-dg','dw-26g','dw-27g'].forEach(id=>{document.getElementById(id).innerHTML=`<option value="">천간</option>${STEMS.map(s=>`<option value="${s}">${SKR[s]}(${s})</option>`).join('')}`;});
+  ['dw-db','dw-26b','dw-27b'].forEach(id=>{document.getElementById(id).innerHTML=`<option value="">지지</option>${BRCHS.map(b=>`<option value="${b}">${BKR[b]}(${b})</option>`).join('')}`;});
+  document.getElementById('dw-dg').value=dg;document.getElementById('dw-db').value=db;
+  document.getElementById('dw-26g').value=g26;document.getElementById('dw-26b').value=b26;
+  document.getElementById('dw-27g').value=g27;document.getElementById('dw-27b').value=b27;
+  dwPrev();
+}
+function dwPrev(){
+  const v=id=>document.getElementById(id)?.value||'';
+  const fmt=(g,b,eid)=>{const el=document.getElementById(eid);if(el)el.textContent=g&&b?`${SKR[g]||''}${BKR[b]||''}(${g}${b})`:'';}; 
+  fmt(v('dw-dg'),v('dw-db'),'dw-pd');fmt(v('dw-26g'),v('dw-26b'),'dw-p26');fmt(v('dw-27g'),v('dw-27b'),'dw-p27');
+}
+function openDw(){fillDwSels(S.myDg,S.myDb,S.my26g,S.my26b,S.my27g,S.my27b);document.getElementById('dw-ov').classList.add('show');}
+function closeDw(){document.getElementById('dw-ov').classList.remove('show');}
+function saveDw(){
+  const v=id=>document.getElementById(id)?.value||'';
+  S.myDg=v('dw-dg');S.myDb=v('dw-db');S.my26g=v('dw-26g');S.my26b=v('dw-26b');S.my27g=v('dw-27g');S.my27b=v('dw-27b');
+  S.saved=S.saved.map(r=>({...r,score:calcScore(r)}));
+  window.persistMy();
+  window.persist();
+  closeDw();renderHeader();renderContent();
+}
+
+function onCSV(){
+  const data=S.filt?S.saved.filter(r=>grd(r.score.total).label===S.filt):S.saved;
+  const h=['이름','생년월일','궁합점수','궁합구분','메모'];
+  const rows=data.map(r=>[r.name,fmtDate(r.date),r.score.total,grd(r.score.total).label,(r.memo||'').replace(/"/g,'""')]);
+  const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='사주궁합.csv';a.click();
+}
+
+// ── 앱 시작 (모듈 로드 완료 대기) ────────────────────────────────────────────
+// 모듈 스크립트는 defer 방식으로 실행되므로 DOMContentLoaded 후 _initApp 호출
+document.addEventListener('DOMContentLoaded', () => {
+  // 모듈이 window._initApp를 정의할 때까지 폴링
+  const waitInit = () => {
+    if (typeof window._initApp === 'function') {
+      window._initApp();
+    } else {
+      setTimeout(waitInit, 50);
+    }
+  };
+  waitInit();
+});
+</script>
+</body>
+</html>

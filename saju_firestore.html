@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사주 궁합 계산기</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f6fb;min-height:100vh;padding-bottom:48px}
+input,select,textarea,button{font-family:inherit}
+.card{background:white;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.07);margin-bottom:10px}
+.lbl{display:block;font-size:11px;color:#888;margin-bottom:4px;font-weight:500}
+.inp{width:100%;padding:8px 10px;border-radius:8px;border:1px solid #e0e0e0;font-size:13px;outline:none}
+.inp:focus{border-color:#1565c0}
+.tab-btn{flex:1;padding:10px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent}
+.tab-btn.active{color:#1565c0;border-bottom-color:#1565c0}
+.tab-btn:not(.active){color:#aaa}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;z-index:1000;padding:0 20px}
+.overlay.show{display:flex}
+.esel{width:100%;padding:3px 2px;border-radius:5px;border:1px solid #e0e0e0;font-size:9px;background:white}
+.eselb{flex:1;padding:6px 4px;border-radius:6px;border:1px solid #e0e0e0;font-size:11px;background:white}
+.ss-sel{flex:1;padding:5px 3px;border-radius:6px;border:1px solid #e0e0e0;font-size:11px;background:white}
+#sync-badge{position:fixed;bottom:16px;right:16px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:500;transition:all .3s;pointer-events:none;display:none}
+</style>
+</head>
+<body>
+
+<!-- 비밀번호 -->
+<div id="pw-screen" style="position:fixed;inset:0;background:linear-gradient(135deg,#dfe9f3 0%,#e8def5 100%);display:flex;align-items:center;justify-content:center;z-index:9999">
+  <div style="background:white;border-radius:22px;padding:32px 24px;width:260px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.12)">
+    <div style="font-size:34px;margin-bottom:10px">🔮</div>
+    <div style="font-size:24px;font-weight:800;color:#1a1a2e;margin-bottom:4px;letter-spacing:-.5px;line-height:1.2">사주 궁합<br>계산기</div>
+    <div style="font-size:11px;color:#bbb;margin-bottom:24px;margin-top:4px">단자리 맞춤 점수표</div>
+    <input id="pw-input" type="password" placeholder="비밀번호 입력" maxlength="10"
+      style="width:100%;padding:9px 12px;border-radius:10px;border:1.5px solid #e0e0e0;font-size:15px;outline:none;text-align:center;letter-spacing:5px;margin-bottom:8px"
+      oninput="document.getElementById('pw-err').textContent=''"
+      onkeydown="if(event.key==='Enter')checkPw()">
+    <div id="pw-err" style="font-size:11px;color:#c62828;height:16px;margin-bottom:8px"></div>
+    <button onclick="checkPw()" style="width:100%;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#1565c0,#283593);color:white;font-size:14px;font-weight:700;cursor:pointer">입장</button>
+  </div>
+</div>
+
+<!-- 로딩 -->
+<div id="loading-screen" style="display:none;position:fixed;inset:0;background:rgba(255,255,255,.85);align-items:center;justify-content:center;z-index:8000;flex-direction:column;gap:12px">
+  <div style="font-size:32px">🔮</div>
+  <div style="font-size:13px;color:#888;font-weight:600">Firestore 연결 중…</div>
+</div>
+
+<div id="hdr" style="background:white;border-bottom:1px solid #eee;padding:10px 14px 8px"></div>
+<div style="background:white;border-bottom:1px solid #eee">
+  <div style="max-width:560px;margin:0 auto;display:flex">
+    <button class="tab-btn active" id="tab-input" onclick="switchTab('input')">✏️ 내 정보</button>
+    <button class="tab-btn" id="tab-dashboard" onclick="switchTab('dashboard')">📊 대시보드</button>
+  </div>
+</div>
+<div id="cwrap" style="max-width:560px;margin:0 auto;padding:12px"></div>
+
+<div id="sync-badge"></div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAFJzVeFUTGo5UY2eSXb7RtGo--4KUniO0",
+  authDomain: "rabbit-s-calculation.firebaseapp.com",
+  projectId: "rabbit-s-calculation",
+  storageBucket: "rabbit-s-calculation.firebasestorage.app",
+  messagingSenderId: "28543784592",
+  appId: "1:28543784592:web:65bbf80bc02278ddd82a15"
+};
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+const SAVED_REF = doc(db, "saju", "saju_v4");
+
+let syncTimer;
+window.showSync = (state) => {
+  const el = document.getElementById('sync-badge');
+  if (!el) return;
+  clearTimeout(syncTimer);
+  const styles = {
+    saving: ['#fff8e1','#f57f17','⏳ 저장 중…'],
+    saved:  ['#e8f5e9','#2e7d32','✓ 저장됨'],
+    synced: ['#e3f2fd','#1565c0','🔄 동기화됨'],
+    error:  ['#ffebee','#c62828','⚠️ 저장 실패'],
+  };
+  const [bg,color,text] = styles[state]||styles.saved;
+  el.style.cssText = `position:fixed;bottom:16px;right:16px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:500;pointer-events:none;display:block;background:${bg};color:${color}`;
+  el.textContent = text;
+  if (state !== 'saving') syncTimer = setTimeout(() => { el.style.display='none'; }, state==='error'?3000:2000);
+};
+
+window.persist = async () => {
+  try {
+    showSync('saving');
+    await setDoc(SAVED_REF, { data: JSON.stringify(S.saved) });
+    showSync('saved');
+  } catch(e) { console.error(e); showSync('error'); }
+};
+
+window._initApp = async () => {
+  document.getElementById('loading-screen').style.display = 'flex';
+  try {
+    const snap = await getDoc(SAVED_REF);
+    if (snap.exists()) {
+      S.saved = JSON.parse(snap.data().data).map(rec => {
+        const base = {t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',memo:'',...rec};
+        return {...base, score: calcScore(base)};
+      });
+    } else {
+      S.saved = SEED.map(r => ({...r, score: calcScore(r)}));
+      await window.persist();
+    }
+  } catch(e) {
+    console.error(e);
+    S.saved = SEED.map(r => ({...r, score: calcScore(r)}));
+  }
+  document.getElementById('loading-screen').style.display = 'none';
+  renderHeader();
+  renderContent();
+  setTimeout(() => document.getElementById('pw-input')?.focus(), 100);
+
+  onSnapshot(SAVED_REF, (snap) => {
+    if (!snap.exists()) return;
+    try {
+      const newSaved = JSON.parse(snap.data().data).map(rec => {
+        const base = {t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',memo:'',...rec};
+        return {...base, score: calcScore(base)};
+      });
+      if (JSON.stringify(newSaved) !== JSON.stringify(S.saved)) {
+        S.saved = newSaved;
+        showSync('synced');
+        renderContent();
+      }
+    } catch(e) {}
+  });
+};
+</script>
+
+<script>
+// ── 상수 ─────────────────────────────────────────────────────────────────────
+const STEMS=['甲','乙','丙','丁','戊','己','庚','辛','壬','癸'];
+const BRCHS=['子','丑','寅','卯','辰','巳','午','未','申','酉','戌','亥'];
+const SKR={甲:'갑',乙:'을',丙:'병',丁:'정',戊:'무',己:'기',庚:'경',辛:'신',壬:'임',癸:'계'};
+const BKR={子:'자',丑:'축',寅:'인',卯:'묘',辰:'진',巳:'사',午:'오',未:'미',申:'신',酉:'유',戌:'술',亥:'해'};
+const OH={甲:'목',乙:'목',丙:'화',丁:'화',戊:'토',己:'토',庚:'금',辛:'금',壬:'수',癸:'수',子:'수',丑:'토',寅:'목',卯:'목',辰:'토',巳:'화',午:'화',未:'토',申:'금',酉:'금',戌:'토',亥:'수'};
+const OHC={목:{bg:'#e8f5e9',bd:'#4caf50',tx:'#1b5e20'},화:{bg:'#ffebee',bd:'#ef5350',tx:'#b71c1c'},토:{bg:'#fff8e1',bd:'#ffa726',tx:'#6d4c00'},금:{bg:'#f5f5f5',bd:'#9e9e9e',tx:'#424242'},수:{bg:'#e3f2fd',bd:'#42a5f5',tx:'#0d47a1'}};
+
+const SS_OPTS=['정관','편관','정인','편인','식신','상관','정재','편재','비견','겁재'];
+
+// ── 내 점수표 (여자 기준) ──────────────────────────────────────────────────────
+const MY_STEM_SCORE={정관:1,편관:1,정인:1,편인:0,식신:0,상관:-1,정재:0,편재:0,비견:-1,겁재:-1};
+const MY_BRANCH_SCORE={정관:2,편관:1,정인:1,편인:0,식신:0,상관:-1,정재:0,편재:0,비견:-1,겁재:-2};
+
+// ── 상대방 점수표 ──────────────────────────────────────────────────────────────
+const OPP_STEM_SCORE={정재:1,편재:1,정관:1,정인:1,편관:0,편인:0,식신:0,상관:-1,비견:-1,겁재:-1};
+const OPP_BRANCH_SCORE={정재:2,편재:1,정관:1,정인:1,편관:0,편인:0,식신:0,상관:-2,비견:-1,겁재:-2};
+
+const GRADES=[
+  {label:'천생연분 ⭐⭐⭐',min:90,color:'#7b1fa2',light:'#f3e5f5'},
+  {label:'우수 궁합 ⭐⭐',min:80,color:'#2e7d32',light:'#e8f5e9'},
+  {label:'보통 궁합 ⭐',min:75,color:'#1565c0',light:'#e3f2fd'},
+  {label:'주의 요망',min:30,color:'#e65100',light:'#fff3e0'},
+  {label:'비추천',min:-999,color:'#c62828',light:'#ffebee'},
+];
+const grd = s => GRADES.find(g => s >= g.min) || GRADES[GRADES.length-1];
+
+// ── 만세력 ─────────────────────────────────────────────────────────────────────
+function toJDN(y,m,d){const a=Math.floor((14-m)/12),yr=y+4800-a,mo=m+12*a-3;return d+Math.floor((153*mo+2)/5)+365*yr+Math.floor(yr/4)-Math.floor(yr/100)+Math.floor(yr/400)-32045;}
+const REF=toJDN(1993,5,10);
+function getMBranch(m,d){const T=[[1,6,1],[2,4,2],[3,6,3],[4,5,4],[5,6,5],[6,6,6],[7,7,7],[8,7,8],[9,8,9],[10,8,10],[11,7,11],[12,7,0]];let i=0;for(const[tm,td,tb]of T)if(m>tm||(m===tm&&d>=td))i=tb;return i;}
+function calcManse(ds,ts=''){
+  if(!ds||ds.length!==8)return null;
+  const y=+ds.slice(0,4),m=+ds.slice(4,6),d=+ds.slice(6,8);
+  if(!y||m<1||m>12||d<1||d>31)return null;
+  const ay=(m<2||(m===2&&d<4))?y-1:y;
+  const ySi=(((6+(ay-1900))%10)+10)%10,yBi=(((ay-1900)%12)+12)%12;
+  const mBi=getMBranch(m,d),mBase=[2,4,6,8,0][ySi%5],mSi=(mBase+(mBi-2+12)%12)%10;
+  const diff=toJDN(y,m,d)-REF;
+  const dSi=((7+diff)%10+10)%10,dBi=((3+diff)%12+12)%12;
+  let hSi=null,hBi=null;
+  const tc=(ts||'').replace(/\D/g,'');
+  if(tc.length>=3){const hr=+tc.slice(0,2),mn=tc.length>=4?+tc.slice(2,4):0;if(hr<24){const mi=hr*60+mn;hBi=(mi>=1380||mi<60)?0:Math.floor((mi-60)/120)+1;hSi=([0,2,4,6,8,0,2,4,6,8][dSi]+hBi)%10;}}
+  return{연간:STEMS[ySi],연지:BRCHS[yBi],월간:STEMS[mSi],월지:BRCHS[mBi],일간:STEMS[dSi],일지:BRCHS[dBi],시간:hSi!==null?STEMS[hSi]:'',시지:hBi!==null?BRCHS[hBi]:''};
+}
+
+// ── 점수 계산 ─────────────────────────────────────────────────────────────────
+function calcMyMarriageScore(){
+  const p = S.myProfile;
+  const sg = k => MY_STEM_SCORE[k] ?? 0;
+  const bg = k => MY_BRANCH_SCORE[k] ?? 0;
+  const s = sg(p.daun_cheongan) + bg(p.daun_jiji)
+          + sg(p.seun2026_cheongan) + bg(p.seun2026_jiji)
+          + sg(p.seun2027_cheongan) + bg(p.seun2027_jiji);
+  return Math.max(-7, Math.min(7, s));
+}
+
+function calcOppMarriageScore(r){
+  const sg = k => OPP_STEM_SCORE[k] ?? 0;
+  const bg = k => OPP_BRANCH_SCORE[k] ?? 0;
+  const s = sg(r.dw_g_ss) + bg(r.dw_b_ss)
+          + sg(r.s6_g_ss) + bg(r.s6_b_ss)
+          + sg(r.s7_g_ss) + bg(r.s7_b_ss);
+  return Math.max(-8, Math.min(8, s));
+}
+
+function calcScore(r){
+  const myScore  = calcMyMarriageScore();
+  const oppScore = calcOppMarriageScore(r);
+  const total    = 75 + myScore + oppScore;
+  return {
+    total,
+    myScore,
+    oppScore,
+    steps: [
+      {lbl:'기본점수',sub:'원국 오행 호합성',score:75,note:'고정'},
+      {lbl:'내 결혼운',sub:'대운+세운 6칸',score:myScore,note:buildMyScoreNote()},
+      {lbl:'상대 결혼운',sub:'대운+세운 6칸',score:oppScore,note:buildOppScoreNote(r)},
+    ]
+  };
+}
+
+function buildMyScoreNote(){
+  const p=S.myProfile;
+  const sg=k=>MY_STEM_SCORE[k]??0, bg=k=>MY_BRANCH_SCORE[k]??0;
+  return [
+    p.daun_cheongan?`대운천간 ${p.daun_cheongan}(${sg(p.daun_cheongan)>0?'+':''}${sg(p.daun_cheongan)})`:null,
+    p.daun_jiji?`대운지지 ${p.daun_jiji}(${bg(p.daun_jiji)>0?'+':''}${bg(p.daun_jiji)})`:null,
+    p.seun2026_cheongan?`26천간 ${p.seun2026_cheongan}(${sg(p.seun2026_cheongan)>0?'+':''}${sg(p.seun2026_cheongan)})`:null,
+    p.seun2026_jiji?`26지지 ${p.seun2026_jiji}(${bg(p.seun2026_jiji)>0?'+':''}${bg(p.seun2026_jiji)})`:null,
+    p.seun2027_cheongan?`27천간 ${p.seun2027_cheongan}(${sg(p.seun2027_cheongan)>0?'+':''}${sg(p.seun2027_cheongan)})`:null,
+    p.seun2027_jiji?`27지지 ${p.seun2027_jiji}(${bg(p.seun2027_jiji)>0?'+':''}${bg(p.seun2027_jiji)})`:null,
+  ].filter(Boolean).join(' · ')||'미입력';
+}
+
+function buildOppScoreNote(r){
+  const sg=k=>OPP_STEM_SCORE[k]??0, bg=k=>OPP_BRANCH_SCORE[k]??0;
+  return [
+    r.dw_g_ss?`대운천간 ${r.dw_g_ss}(${sg(r.dw_g_ss)>0?'+':''}${sg(r.dw_g_ss)})`:null,
+    r.dw_b_ss?`대운지지 ${r.dw_b_ss}(${bg(r.dw_b_ss)>0?'+':''}${bg(r.dw_b_ss)})`:null,
+    r.s6_g_ss?`26천간 ${r.s6_g_ss}(${sg(r.s6_g_ss)>0?'+':''}${sg(r.s6_g_ss)})`:null,
+    r.s6_b_ss?`26지지 ${r.s6_b_ss}(${bg(r.s6_b_ss)>0?'+':''}${bg(r.s6_b_ss)})`:null,
+    r.s7_g_ss?`27천간 ${r.s7_g_ss}(${sg(r.s7_g_ss)>0?'+':''}${sg(r.s7_g_ss)})`:null,
+    r.s7_b_ss?`27지지 ${r.s7_b_ss}(${bg(r.s7_b_ss)>0?'+':''}${bg(r.s7_b_ss)})`:null,
+  ].filter(Boolean).join(' · ')||'미입력';
+}
+
+// ── 시드 ─────────────────────────────────────────────────────────────────────
+function mkSeed(id,name,date,연간,연지,월간,월지,일간,일지,시간,시지){
+  return{id,name,date,연간,연지,월간,월지,일간,일지,시간,시지,t_ilgan:'',dw_g_ss:'',dw_b_ss:'',s6_g_ss:'',s6_b_ss:'',s7_g_ss:'',s7_b_ss:'',memo:'',score:{total:75,myScore:0,oppScore:0,steps:[]}};
+}
+const SEED=[
+  mkSeed(1,'김동욱','19911007','辛','未','','酉','庚','戌','',''),
+  mkSeed(2,'이현준','19911116','辛','未','','亥','庚','寅','',''),
+  mkSeed(3,'강인호','19930129','壬','申','','丑','庚','戌','',''),
+  mkSeed(4,'김민호','19900913','庚','午','','酉','辛','巳','',''),
+  mkSeed(5,'이현수','19881214','戊','辰','','子','癸','卯','',''),
+  mkSeed(6,'전해성','19910312','辛','未','','卯','辛','巳','',''),
+  mkSeed(7,'강기성','19880409','戊','辰','','辰','甲','午','',''),
+  mkSeed(8,'박지훈','19941213','甲','戌','','子','癸','酉','',''),
+];
+
+// ── 상태 ─────────────────────────────────────────────────────────────────────
+const EMPTY_FORM={name:'',연간:'',연지:'',월간:'',월지:'',일간:'',일지:'',시간:'',시지:''};
+const EMPTY_PROFILE={
+  name:'단자리', birthDate:'', time:'',
+  daun_cheongan:'', daun_jiji:'',
+  seun2026_cheongan:'', seun2026_jiji:'',
+  seun2027_cheongan:'', seun2027_jiji:'',
+};
+let S={
+  tab:'input',
+  saved:[], filt:null, editId:null,
+  sortKey:'score', sortDir:'desc',
+  myProfile:{...EMPTY_PROFILE},
+  myManse:null,  // 만세력 결과
+  dateIn:'', timeIn:'',
+};
+
+// ── localStorage (프로필 전용) ─────────────────────────────────────────────────
+function lsKey(name){ return `saguju_user_${name}`; }
+function getSavedProfiles(){
+  const keys=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k&&k.startsWith('saguju_user_'))keys.push(k.replace('saguju_user_',''));
+  }
+  return keys.sort();
+}
+function saveProfile(p){
+  localStorage.setItem(lsKey(p.name), JSON.stringify({...p, savedDate:new Date().toISOString().slice(0,10)}));
+}
+function loadProfile(name){
+  const raw=localStorage.getItem(lsKey(name));
+  return raw?JSON.parse(raw):null;
+}
+function deleteProfile(name){ localStorage.removeItem(lsKey(name)); }
+
+// ── 유틸 ─────────────────────────────────────────────────────────────────────
+const fmtDate=s=>{const c=(s||'').replace(/\D/g,'');return c.length===8?`${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}`:s;};
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const scoreColor=v=>v>0?'#2e7d32':v<0?'#c62828':'#888';
+const sgnStr=v=>(v>0?'+':'')+v;
+
+function cbHTML(ch,sz=40){
+  const oh=ch&&OH[ch],st=oh?OHC[oh]:null;
+  const bg=st?.bg||'#f5f5f5',bd=st?.bd||'#e0e0e0',tx=st?.tx||'#ccc';
+  return`<div style="width:${sz}px;height:${sz}px;border-radius:${(sz*.22).toFixed(0)}px;background:${bg};border:2px solid ${bd};display:inline-flex;align-items:center;justify-content:center;font-size:${(sz*.52).toFixed(0)}px;font-weight:700;color:${tx};flex-shrink:0;vertical-align:middle">${esc(ch)||'?'}</div>`;
+}
+
+function ssSel(id, val, onch=''){
+  return `<select id="${id}" class="ss-sel" onchange="${onch}">`
+    + `<option value="">-</option>`
+    + SS_OPTS.map(nm=>`<option value="${nm}"${val===nm?' selected':''}>${nm}</option>`).join('')
+    + `</select>`;
+}
+function ssSelE(id,val,onch=''){
+  return `<select id="${id}" class="eselb" onchange="${onch}">`
+    + `<option value="">-</option>`
+    + SS_OPTS.map(nm=>`<option value="${nm}"${val===nm?' selected':''}>${nm}</option>`).join('')
+    + `</select>`;
+}
+function stemSelE(fk,cv){return`<select id="ed-${fk}" onchange="edSel('${fk}')" class="esel"><option value="">천간</option>${STEMS.map(s=>`<option value="${s}"${cv===s?' selected':''}>${SKR[s]}(${s})</option>`).join('')}</select>`;}
+function branchSelE(fk,cv){return`<select id="ed-${fk}" onchange="edSel('${fk}')" class="esel"><option value="">지지</option>${BRCHS.map(b=>`<option value="${b}"${cv===b?' selected':''}>${BKR[b]}(${b})</option>`).join('')}</select>`;}
+function ilganSelE(id,cv){return`<select id="ed-${id}" class="eselb"><option value="">일간 선택</option>${STEMS.map(s=>`<option value="${s}"${cv===s?' selected':''}>${SKR[s]}(${s}) · ${OH[s]||''}</option>`).join('')}</select>`;}
+
+// ── 내 정보 탭 ─────────────────────────────────────────────────────────────────
+function buildInputTab(){
+  const p = S.myProfile;
+  const profiles = getSavedProfiles();
+  const ms = S.myManse;
+  const myScore = calcMyMarriageScore();
+
+  return `
+  <!-- 프로필 저장/불러오기 -->
+  <div class="card">
+    <div style="font-size:12px;font-weight:700;color:#222;margin-bottom:10px">👤 프로필 저장/불러오기</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center">
+      <select id="prof-sel" class="ss-sel" style="flex:2">
+        <option value="">저장된 프로필 선택</option>
+        ${profiles.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+      </select>
+      <button onclick="onLoadProfile()" style="padding:7px 10px;border-radius:8px;border:none;background:#1565c0;color:white;font-size:11px;font-weight:700;cursor:pointer">불러오기</button>
+      <button onclick="onDeleteProfile()" style="padding:7px 10px;border-radius:8px;border:1px solid #ffcdd2;background:#fff5f5;color:#c62828;font-size:11px;font-weight:700;cursor:pointer">삭제</button>
+    </div>
+    <button onclick="onSaveProfile()" style="width:100%;padding:9px;border-radius:9px;border:none;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:white;font-size:13px;font-weight:700;cursor:pointer">💾 현재 정보 저장</button>
+  </div>
+
+  <!-- 기본 정보 -->
+  <div class="card">
+    <div style="font-size:12px;font-weight:700;color:#222;margin-bottom:10px">기본 정보</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <div style="flex:1">
+        <label class="lbl">이름</label>
+        <input id="my-name" class="inp" value="${esc(p.name)}" placeholder="이름" oninput="S.myProfile.name=this.value">
+      </div>
+      <div style="flex:1.4">
+        <label class="lbl">생년월일 (YYYYMMDD)</label>
+        <input id="my-date" class="inp" value="${esc(S.dateIn)}" placeholder="예: 19930129" maxlength="8" oninput="onMyDateInput(this.value)">
+      </div>
+      <div style="flex:.9">
+        <label class="lbl">시간 (HHmm)</label>
+        <input id="my-time" class="inp" value="${esc(S.timeIn)}" placeholder="예: 0445" maxlength="4" oninput="onMyTimeInput(this.value)">
+      </div>
+    </div>
+    ${S.dateIn.length===8&&ms?`<div style="font-size:9px;color:#2e7d32;background:#e8f5e9;padding:3px 10px;border-radius:7px;display:inline-block;margin-bottom:8px">✓ 만세력 자동계산됨</div>`:''}
+
+    <!-- 사주명식 표시 (읽기전용) -->
+    ${ms?`
+    <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">📋 내 사주명식</div>
+    <div style="display:flex;gap:6px;margin-bottom:4px">
+      ${[['시주','자식·말년',ms.시간,ms.시지],['일주 ✦','본인·배우자',ms.일간,ms.일지],['월주','사회·부모',ms.월간,ms.월지],['연주','국가·조상',ms.연간,ms.연지]].map(([lbl,sub,g,b])=>`
+      <div style="flex:1;text-align:center">
+        <div style="font-size:9px;font-weight:600;color:#555;margin-bottom:2px">${lbl}</div>
+        <div style="font-size:7px;color:#ccc;margin-bottom:4px">${sub}</div>
+        <div style="display:flex;justify-content:center;margin-bottom:2px">${cbHTML(g||'',30)}</div>
+        <div style="display:flex;justify-content:center">${cbHTML(b||'',30)}</div>
+      </div>`).join('')}
+    </div>`:
+    `<div style="font-size:11px;color:#bbb;text-align:center;padding:12px 0">생년월일 입력 시 사주명식 자동 표시</div>`}
+  </div>
+
+  <!-- 내 대운/세운 십성 -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:#222">내 대운/세운 십성 (여자 기준)</div>
+      <span style="font-size:12px;font-weight:800;color:${scoreColor(myScore)}">내 결혼운 ${sgnStr(myScore)}점</span>
+    </div>
+    ${buildMySSRow('내 대운','#f8f4ff','#7b1fa2','daun_cheongan','daun_jiji')}
+    ${buildMySSRow('2026 세운','#eff4ff','#1565c0','seun2026_cheongan','seun2026_jiji')}
+    ${buildMySSRow('2027 세운','#effaf2','#2e7d32','seun2027_cheongan','seun2027_jiji')}
+    <div style="font-size:9px;color:#bbb;margin-top:6px">변경 즉시 대시보드 전체 점수 재계산</div>
+  </div>
+
+  <!-- 점수 기준 -->
+  <div class="card" style="padding:12px 14px">
+    <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">📊 궁합 점수 기준</div>
+    <div style="display:flex;gap:4px">
+      ${GRADES.map((g,i)=>{const r=['90+','80~89','75~79','30~74','~29'];return`<div style="flex:1;text-align:center;background:${g.light};border-radius:8px;padding:7px 3px;border:1px solid ${g.color}33"><div style="font-size:9px;font-weight:800;color:${g.color};line-height:1.3">${g.label}</div><div style="font-size:8px;color:${g.color};opacity:.75;margin-top:1px">${r[i]}</div></div>`;}).join('')}
+    </div>
+    <div style="margin-top:8px;font-size:9px;color:#bbb;line-height:1.6">
+      기본 75점 + 내 결혼운(최대+7) + 상대 결혼운(최대+8) = 최대 90점
+    </div>
+  </div>`;
+}
+
+function buildMySSRow(label, bg, color, gKey, bKey){
+  const p = S.myProfile;
+  const gv = p[gKey]||'', bv = p[bKey]||'';
+  const gs = MY_STEM_SCORE[gv]??0, bs = MY_BRANCH_SCORE[bv]??0;
+  return `<div style="background:${bg};border-radius:8px;padding:8px 10px;margin-bottom:7px">
+    <div style="font-size:10px;color:${color};font-weight:700;margin-bottom:6px">${label}
+      <span style="font-size:9px;font-weight:400;color:${gs+bs!==0?color:'#bbb'}">&nbsp;소계: ${sgnStr(gs+bs)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <div style="flex:0 0 28px;font-size:10px;color:#888">천간</div>
+      ${ssSel('my-'+gKey, gv, `onMySSChange('${gKey}',this.value)`)}
+      <span style="font-size:11px;font-weight:700;color:${scoreColor(gs)};min-width:26px">${sgnStr(gs)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="flex:0 0 28px;font-size:10px;color:#888">지지</div>
+      ${ssSel('my-'+bKey, bv, `onMySSChange('${bKey}',this.value)`)}
+      <span style="font-size:11px;font-weight:700;color:${scoreColor(bs)};min-width:26px">${sgnStr(bs)}</span>
+    </div>
+  </div>`;
+}
+
+// ── 대시보드 ──────────────────────────────────────────────────────────────────
+function buildDashboard(){
+  const filtData=S.saved.filter(r=>!S.filt||grd(r.score.total).label===S.filt);
+  const sorted=[...filtData].sort((a,b)=>{
+    if(S.sortKey==='name')return S.sortDir==='asc'?a.name.localeCompare(b.name):b.name.localeCompare(a.name);
+    return S.sortDir==='desc'?b.score.total-a.score.total:a.score.total-b.score.total;
+  });
+  const myScore = calcMyMarriageScore();
+  return`
+  <!-- 내 결혼운 요약 -->
+  <div style="background:white;border-radius:12px;padding:10px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);border-left:3px solid #7b1fa2">
+    <div style="font-size:11px;color:#888;margin-bottom:3px">현재 내 결혼운 점수</div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <span style="font-size:20px;font-weight:900;color:${scoreColor(myScore)}">${sgnStr(myScore)}</span>
+      <div style="font-size:10px;color:#777;line-height:1.6">${buildMyScoreNote()||'내 정보 탭에서 대운/세운 입력'}</div>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:14px;font-weight:700;color:#1a1a2e">저장 <span style="color:#1565c0;font-weight:900">${S.saved.length}</span>명</div>
+    <div style="display:flex;gap:6px">
+      <button onclick="onCSV()" style="padding:5px 10px;border-radius:7px;border:1px solid #1565c0;background:white;color:#1565c0;font-size:11px;font-weight:600;cursor:pointer">📥 다운로드</button>
+      <label style="padding:5px 10px;border-radius:7px;border:1px solid #2e7d32;background:white;color:#2e7d32;font-size:11px;font-weight:600;cursor:pointer">
+        📤 업로드<input type="file" accept=".csv" onchange="onImportCSV(event)" style="display:none">
+      </label>
+    </div>
+  </div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+    ${GRADES.map(g=>`<button onclick="toggleFilt('${g.label}')" style="padding:3px 9px;border-radius:13px;border:1.5px solid ${g.color};background:${S.filt===g.label?g.color:'white'};color:${S.filt===g.label?'white':g.color};font-size:10px;font-weight:600;cursor:pointer">${g.label}</button>`).join('')}
+  </div>
+  <div style="display:flex;gap:5px;margin-bottom:10px;align-items:center">
+    <span style="font-size:10px;color:#bbb">정렬:</span>
+    ${[['score','점수'],['name','이름']].map(([k,l])=>`<button onclick="toggleSort('${k}')" style="padding:3px 9px;border-radius:10px;border:1px solid ${S.sortKey===k?'#1565c0':'#e0e0e0'};background:${S.sortKey===k?'#e3f2fd':'white'};color:${S.sortKey===k?'#1565c0':'#888'};font-size:10px;font-weight:600;cursor:pointer">${l}${S.sortKey===k?(S.sortDir==='desc'?' ↓':' ↑'):''}</button>`).join('')}
+    <span style="font-size:9px;color:#ccc;margin-left:auto">${S.filt?`${filtData.length}명`:`전체 ${S.saved.length}명`}</span>
+  </div>
+  ${sorted.length===0
+    ?`<div class="card" style="text-align:center;padding:48px 16px"><div style="font-size:44px;margin-bottom:10px">🔮</div><div style="color:#bbb;font-size:13px">저장된 결과가 없습니다</div></div>`
+    :sorted.map(r=>buildCard(r)).join('')}`;
+}
+
+function buildCard(r){
+  const g=grd(r.score.total), isEd=S.editId===r.id;
+  return`<div style="background:white;border-radius:14px;overflow:hidden;margin-bottom:7px;border:1px solid ${isEd?g.color:'#f0f0f0'};box-shadow:0 2px 8px rgba(0,0,0,.07)">
+    <div onclick="toggleEdit(${r.id})" style="display:flex;align-items:center;gap:7px;padding:0 12px;cursor:pointer;height:64px">
+      <span style="flex:0 0 auto;font-size:9px;font-weight:700;color:${g.color};background:${g.light};padding:2px 6px;border-radius:7px;white-space:nowrap">${g.label}</span>
+      <div style="flex:0 0 34px;font-size:19px;font-weight:900;color:${g.color};text-align:right;line-height:1">${r.score.total}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px;color:#1a1a2e;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(r.name)}</div>
+        <div style="font-size:10px;color:#aaa;margin-top:1px">내${sgnStr(r.score.myScore??0)} · 상대${sgnStr(r.score.oppScore??0)}</div>
+      </div>
+      <div style="flex:0 0 auto;display:flex;gap:2px">${cbHTML(r.일간,25)}${cbHTML(r.일지,25)}</div>
+      <span style="font-size:13px;color:${r.memo?'#1565c0':'#d0d0d0'};flex:0 0 auto">📝</span>
+      <span style="font-size:10px;color:#bbb;flex:0 0 auto">${isEd?'▲':'▼'}</span>
+    </div>
+    ${isEd?buildInlineEditForm(r):''}
+  </div>`;
+}
+
+// ── 인라인 수정 폼 ─────────────────────────────────────────────────────────────
+function buildInlineEditForm(r){
+  const g=grd(r.score.total);
+  const oppScore = calcOppMarriageScore(r);
+  const myScore  = calcMyMarriageScore();
+  return`<div style="border-top:1px solid #e8e8e8;padding:12px 14px;background:#fafafa">
+
+    <!-- 점수 요약 -->
+    <div style="padding:10px 14px;background:${g.light};border-radius:10px;margin-bottom:12px;border:1px solid ${g.color}33">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span style="font-size:28px;font-weight:900;color:${g.color}">${r.score.total}</span>
+        <span style="font-size:13px;font-weight:700;color:${g.color}">${g.label}</span>
+      </div>
+      <div style="display:flex;gap:14px;font-size:10px;color:#777">
+        <span>기본 75점</span>
+        <span style="color:${scoreColor(myScore)}">내 결혼운 ${sgnStr(myScore)}</span>
+        <span style="color:${scoreColor(oppScore)}">상대 결혼운 ${sgnStr(oppScore)}</span>
+      </div>
+    </div>
+
+    <!-- 이름/생년월일 -->
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div style="flex:1"><label class="lbl">이름</label><input id="ed-name" class="inp" value="${esc(r.name)}"></div>
+      <div style="flex:1.5"><label class="lbl">생년월일 (YYYYMMDD)</label>
+        <div style="display:flex;gap:5px">
+          <input id="ed-date" class="inp" value="${esc(r.date)}" maxlength="8" placeholder="19930129">
+          <button onclick="edAutoCalc()" style="padding:8px;border-radius:8px;border:1px solid #1565c0;background:#e3f2fd;color:#1565c0;font-size:10px;cursor:pointer;font-weight:600;white-space:nowrap">만세력</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 사주팔자 -->
+    <label class="lbl" style="margin-bottom:6px">사주팔자</label>
+    <div style="display:flex;gap:5px;margin-bottom:12px">
+      ${[['시주','자식·말년','sg','sb',r.시간||'',r.시지||''],
+         ['일주 ✦','본인·배우자','dg','db',r.일간||'',r.일지||''],
+         ['월주','사회·부모','mg','mb',r.월간||'',r.월지||''],
+         ['연주','국가·조상','yg','yb',r.연간||'',r.연지||'']].map(([lbl,sub,gk,bk,gv,bv])=>`
+      <div style="flex:1;text-align:center">
+        <div style="font-size:9px;font-weight:600;color:#555;margin-bottom:2px">${lbl}</div>
+        <div style="font-size:7px;color:#ccc;margin-bottom:4px">${sub}</div>
+        <div id="ed-chip-${gk}" style="display:flex;justify-content:center;margin-bottom:2px">${cbHTML(gv,30)}</div>
+        <div id="ed-chip-${bk}" style="display:flex;justify-content:center;margin-bottom:4px">${cbHTML(bv,30)}</div>
+        ${stemSelE(gk,gv)}<div style="height:2px"></div>${branchSelE(bk,bv)}
+      </div>`).join('')}
+    </div>
+
+    <!-- 상대방 일간 -->
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px">
+      <div style="flex:0 0 56px;font-size:11px;color:#888;font-weight:500">상대 일간</div>
+      ${ilganSelE('t_ilgan',r.t_ilgan||'')}
+    </div>
+
+    <!-- 상대방 대운/세운 십성 -->
+    <div style="font-size:11px;font-weight:700;color:#555;margin-bottom:8px">상대방 대운/세운 십성</div>
+    ${buildOppSSEditRow('대운','#f8f4ff','#7b1fa2','dw_g_ss','dw_b_ss',r.dw_g_ss||'',r.dw_b_ss||'')}
+    ${buildOppSSEditRow('2026 세운','#eff4ff','#1565c0','s6_g_ss','s6_b_ss',r.s6_g_ss||'',r.s6_b_ss||'')}
+    ${buildOppSSEditRow('2027 세운','#effaf2','#2e7d32','s7_g_ss','s7_b_ss',r.s7_g_ss||'',r.s7_b_ss||'')}
+
+    <!-- 메모 -->
+    <label class="lbl" style="margin-top:4px">메모</label>
+    <textarea id="ed-memo" placeholder="첫 만남, 특이사항 등…" style="width:100%;height:60px;padding:8px 10px;border-radius:8px;border:1px solid #e0e0e0;font-size:12px;resize:none;line-height:1.5;outline:none;margin-top:4px;background:white">${esc(r.memo||'')}</textarea>
+
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="saveInlineEdit()" style="flex:1;padding:10px;border-radius:8px;border:none;background:#1565c0;color:white;font-weight:700;cursor:pointer;font-size:13px">저장</button>
+      <button onclick="cancelInlineEdit()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #e0e0e0;background:white;font-weight:600;cursor:pointer;font-size:13px">취소</button>
+      <button onclick="onDel(${r.id})" style="padding:10px 13px;border-radius:8px;border:1px solid #ffcdd2;background:#fff5f5;color:#c62828;font-size:13px;cursor:pointer">🗑️</button>
+    </div>
+  </div>`;
+}
+
+function buildOppSSEditRow(label,bgc,color,gId,bId,gVal,bVal){
+  const gs=OPP_STEM_SCORE[gVal]??0, bs=OPP_BRANCH_SCORE[bVal]??0;
+  return`<div style="background:${bgc};border-radius:8px;padding:8px 10px;margin-bottom:7px">
+    <div style="font-size:10px;color:${color};font-weight:700;margin-bottom:5px">${label}
+      <span id="${gId}-sub" style="font-size:9px;font-weight:400;color:${gs+bs!==0?color:'#bbb'}">&nbsp;${sgnStr(gs+bs)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <div style="flex:0 0 28px;font-size:10px;color:#888">천간</div>
+      ${ssSelE(gId,gVal,'edOppSSUpdate()')}
+      <span id="${gId}-score" style="font-size:11px;font-weight:700;color:${scoreColor(gs)};min-width:26px">${sgnStr(gs)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="flex:0 0 28px;font-size:10px;color:#888">지지</div>
+      ${ssSelE(bId,bVal,'edOppSSUpdate()')}
+      <span id="${bId}-score" style="font-size:11px;font-weight:700;color:${scoreColor(bs)};min-width:26px">${sgnStr(bs)}</span>
+    </div>
+  </div>`;
+}
+
+// ── 렌더 ─────────────────────────────────────────────────────────────────────
+function renderHeader(){
+  const ms = S.myManse;
+  document.getElementById('hdr').innerHTML=`<div style="max-width:560px;margin:0 auto">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:20px">🔮</span>
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#1a1a2e">사주 궁합 계산기</div>
+          <div style="font-size:9px;color:#bbb">${esc(S.myProfile.name)||'단자리'} 맞춤 점수표</div>
+        </div>
+      </div>
+    </div>
+    ${ms?`<div style="display:flex;gap:5px;align-items:center;margin-top:7px;padding-top:7px;border-top:1px solid #f5f5f5;flex-wrap:wrap">
+      <span style="font-size:9px;color:#bbb">내 사주 →</span>
+      ${[['시',ms.시간,ms.시지],['일',ms.일간,ms.일지],['월',ms.월간,ms.월지],['연',ms.연간,ms.연지]].map(([l,s,b])=>`
+      <div style="display:flex;align-items:center;gap:1px"><span style="font-size:8px;color:#ccc">${l}</span>${cbHTML(s,21)}${cbHTML(b,21)}</div>`).join('')}
+    </div>`:''}
+  </div>`;
+}
+
+function renderContent(){
+  const fw=document.activeElement,fid=fw?.id,fsel=fw?.selectionStart;
+  document.getElementById('cwrap').innerHTML = S.tab==='input' ? buildInputTab() : buildDashboard();
+  if(fid){const el=document.getElementById(fid);if(el){el.focus();if(fsel!=null)try{el.setSelectionRange(fsel,fsel);}catch{}}}
+}
+
+// ── 이벤트 ────────────────────────────────────────────────────────────────────
+function checkPw(){
+  const pw=document.getElementById('pw-input').value;
+  if(pw==='0510'){document.getElementById('pw-screen').style.display='none';}
+  else{document.getElementById('pw-err').textContent='비밀번호가 맞지 않습니다';document.getElementById('pw-input').value='';document.getElementById('pw-input').focus();setTimeout(()=>{const e=document.getElementById('pw-err');if(e)e.textContent='';},2000);}
+}
+
+function switchTab(t){
+  S.tab=t;S.editId=null;
+  document.getElementById('tab-input').className='tab-btn'+(t==='input'?' active':'');
+  document.getElementById('tab-dashboard').className='tab-btn'+(t==='dashboard'?' active':'');
+  renderContent();
+}
+
+// 내 정보 입력
+function onMyDateInput(v){
+  S.dateIn=v.replace(/\D/g,'').slice(0,8);
+  S.myProfile.birthDate=S.dateIn;
+  if(S.dateIn.length===8){const r=calcManse(S.dateIn,S.timeIn);S.myManse=r||null;}
+  else S.myManse=null;
+  renderHeader();renderContent();
+}
+function onMyTimeInput(v){
+  S.timeIn=v.replace(/\D/g,'').slice(0,4);
+  S.myProfile.time=S.timeIn;
+  if(S.dateIn.length===8){const r=calcManse(S.dateIn,S.timeIn);S.myManse=r||null;}
+  renderHeader();renderContent();
+}
+function onMySSChange(key, val){
+  S.myProfile[key]=val;
+  // 대시보드 전체 재계산
+  S.saved=S.saved.map(r=>({...r,score:calcScore(r)}));
+  renderHeader();renderContent();
+}
+
+// 프로필 저장/불러오기
+function onSaveProfile(){
+  const name=(document.getElementById('my-name')?.value||S.myProfile.name).trim();
+  if(!name){alert('이름을 입력하세요');return;}
+  S.myProfile.name=name;
+  saveProfile(S.myProfile);
+  alert(`✅ "${name}" 저장되었습니다`);
+  renderContent();
+}
+function onLoadProfile(){
+  const sel=document.getElementById('prof-sel');
+  const name=sel?.value;
+  if(!name){alert('프로필을 선택하세요');return;}
+  const p=loadProfile(name);
+  if(!p){alert('프로필을 찾을 수 없습니다');return;}
+  S.myProfile={...EMPTY_PROFILE,...p};
+  S.dateIn=p.birthDate||'';
+  S.timeIn=p.time||'';
+  if(S.dateIn.length===8)S.myManse=calcManse(S.dateIn,S.timeIn)||null;
+  else S.myManse=null;
+  S.saved=S.saved.map(r=>({...r,score:calcScore(r)}));
+  renderHeader();renderContent();
+}
+function onDeleteProfile(){
+  const sel=document.getElementById('prof-sel');
+  const name=sel?.value;
+  if(!name){alert('프로필을 선택하세요');return;}
+  if(!confirm(`"${name}" 프로필을 삭제하시겠습니까?`))return;
+  deleteProfile(name);
+  renderContent();
+}
+
+// 대시보드
+function toggleEdit(id){S.editId=S.editId===id?null:id;renderContent();}
+function toggleFilt(lbl){S.filt=S.filt===lbl?null:lbl;renderContent();}
+function toggleSort(k){if(S.sortKey===k)S.sortDir=S.sortDir==='desc'?'asc':'desc';else{S.sortKey=k;S.sortDir='desc';}renderContent();}
+
+function onDel(id){
+  if(!confirm('삭제하시겠습니까?'))return;
+  S.saved=S.saved.filter(r=>r.id!==id);
+  window.persist();
+  if(S.editId===id)S.editId=null;
+  renderContent();
+}
+
+// 인라인 수정
+function edSel(key){
+  const val=document.getElementById(`ed-${key}`)?.value;
+  const chip=document.getElementById(`ed-chip-${key}`);
+  if(chip)chip.innerHTML=cbHTML(val||'',30);
+}
+function edOppSSUpdate(){
+  const ids=['dw_g_ss','dw_b_ss','s6_g_ss','s6_b_ss','s7_g_ss','s7_b_ss'];
+  ids.forEach(id=>{
+    const v=document.getElementById(`ed-${id}`)?.value||'';
+    const s=id.endsWith('_g_ss')?(OPP_STEM_SCORE[v]??0):(OPP_BRANCH_SCORE[v]??0);
+    const el=document.getElementById(`${id}-score`);
+    if(el){el.textContent=sgnStr(s);el.style.color=scoreColor(s);}
+  });
+  // 그룹 소계
+  [['dw_g_ss','dw_b_ss'],['s6_g_ss','s6_b_ss'],['s7_g_ss','s7_b_ss']].forEach(([g,b])=>{
+    const gv=document.getElementById(`ed-${g}`)?.value||'';
+    const bv=document.getElementById(`ed-${b}`)?.value||'';
+    const t=(OPP_STEM_SCORE[gv]??0)+(OPP_BRANCH_SCORE[bv]??0);
+    const sub=document.getElementById(`${g}-sub`);
+    if(sub){sub.textContent=` ${sgnStr(t)}`;sub.style.color=t!==0?scoreColor(t):'#bbb';}
+  });
+}
+function edAutoCalc(){
+  const dt=(document.getElementById('ed-date')?.value||'').replace(/\D/g,'').slice(0,8);
+  if(dt.length!==8)return;
+  const r=calcManse(dt);if(!r)return;
+  const m={sg:r.시간,sb:r.시지,dg:r.일간,db:r.일지,mg:r.월간,mb:r.월지,yg:r.연간,yb:r.연지};
+  Object.entries(m).forEach(([k,v])=>{const el=document.getElementById(`ed-${k}`);if(el){el.value=v||'';edSel(k);}});
+}
+function saveInlineEdit(){
+  const id=S.editId;if(!id)return;
+  const v=k=>document.getElementById(`ed-${k}`)?.value||'';
+  const upd={
+    name:document.getElementById('ed-name')?.value||'무명',
+    date:(document.getElementById('ed-date')?.value||'').replace(/\D/g,'').slice(0,8),
+    시간:v('sg'),시지:v('sb'),일간:v('dg'),일지:v('db'),
+    월간:v('mg'),월지:v('mb'),연간:v('yg'),연지:v('yb'),
+    t_ilgan:v('t_ilgan'),
+    dw_g_ss:v('dw_g_ss'),dw_b_ss:v('dw_b_ss'),
+    s6_g_ss:v('s6_g_ss'),s6_b_ss:v('s6_b_ss'),
+    s7_g_ss:v('s7_g_ss'),s7_b_ss:v('s7_b_ss'),
+    memo:document.getElementById('ed-memo')?.value||'',
+  };
+  S.saved=S.saved.map(r=>{if(r.id!==id)return r;const u={...r,...upd};return{...u,score:calcScore(u)};});
+  S.editId=null;window.persist();renderContent();
+}
+function cancelInlineEdit(){S.editId=null;renderContent();}
+
+// ── CSV 다운로드/업로드 ────────────────────────────────────────────────────────
+function onCSV(){
+  const data=S.filt?S.saved.filter(r=>grd(r.score.total).label===S.filt):S.saved;
+  const h=['궁합구분','점수','이름','생년월일','일간','일지','월간','월지','연간','연지','시간','시지','대운천간','대운지지','세운26천간','세운26지지','세운27천간','세운27지지','메모'];
+  const rows=data.map(r=>[
+    grd(r.score.total).label,r.score.total,
+    r.name,fmtDate(r.date),
+    r.일간||'',r.일지||'',r.월간||'',r.월지||'',r.연간||'',r.연지||'',r.시간||'',r.시지||'',
+    r.dw_g_ss||'',r.dw_b_ss||'',r.s6_g_ss||'',r.s6_b_ss||'',r.s7_g_ss||'',r.s7_b_ss||'',
+    (r.memo||'').replace(/"/g,'""')
+  ]);
+  const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='사주궁합.csv';a.click();
+}
+function onImportCSV(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    try{
+      const lines=ev.target.result.split('\n').map(l=>l.trim()).filter(Boolean);
+      if(lines.length<2){alert('데이터가 없습니다');return;}
+      const parse=line=>{const r=[];let cur='',inQ=false;for(const c of line){if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){r.push(cur);cur='';}else cur+=c;}r.push(cur);return r.map(s=>s.replace(/^"|"$/g,'').replace(/""/g,'"'));};
+      const hdr=parse(lines[0]);
+      const idx=k=>hdr.indexOf(k);
+      const imported=lines.slice(1).map((line,i)=>{
+        const cols=parse(line);
+        const get=k=>cols[idx(k)]||'';
+        const dateRaw=get('생년월일').replace(/\D/g,'');
+        const rec={
+          id:Date.now()+i, name:get('이름')||'무명', date:dateRaw,
+          일간:get('일간'),일지:get('일지'),월간:get('월간'),월지:get('월지'),
+          연간:get('연간'),연지:get('연지'),시간:get('시간'),시지:get('시지'),
+          dw_g_ss:get('대운천간'),dw_b_ss:get('대운지지'),
+          s6_g_ss:get('세운26천간'),s6_b_ss:get('세운26지지'),
+          s7_g_ss:get('세운27천간'),s7_b_ss:get('세운27지지'),
+          t_ilgan:'', memo:get('메모'),
+        };
+        return{...rec,score:calcScore(rec)};
+      });
+      const key=r=>`${r.name}_${r.date}`;
+      const map=new Map(S.saved.map(r=>[key(r),r]));
+      imported.forEach(r=>map.set(key(r),r));
+      S.saved=[...map.values()];
+      await window.persist();
+      alert(`✅ ${imported.length}건 업로드 완료`);
+      renderContent();
+    }catch(err){alert('파싱 오류: '+err.message);}
+    e.target.value='';
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
+// ── 앱 시작 ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded',()=>{
+  const wait=()=>{ typeof window._initApp==='function'?window._initApp():setTimeout(wait,50); };
+  wait();
+});
+</script>
+</body>
+</html>

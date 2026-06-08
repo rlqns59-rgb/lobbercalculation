@@ -594,7 +594,12 @@ function buildDashboard(){
   return`
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <div style="font-size:14px;font-weight:700;color:#1a1a2e">저장 <span style="color:#1565c0;font-weight:900">${S.saved.length}</span>명</div>
-    ${S.saved.length?`<button onclick="onCSV()" style="padding:5px 12px;border-radius:7px;border:1px solid #1565c0;background:white;color:#1565c0;font-size:11px;font-weight:600;cursor:pointer">📥 CSV</button>`:''}
+    <div style="display:flex;gap:6px;align-items:center">
+      <button onclick="onCSV()" style="padding:5px 12px;border-radius:7px;border:1px solid #1565c0;background:white;color:#1565c0;font-size:11px;font-weight:600;cursor:pointer">📥 다운로드</button>
+      <label style="padding:5px 12px;border-radius:7px;border:1px solid #2e7d32;background:white;color:#2e7d32;font-size:11px;font-weight:600;cursor:pointer">
+        📤 업로드<input type="file" accept=".csv" onchange="onImportCSV(event)" style="display:none">
+      </label>
+    </div>
   </div>
   <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
     ${GRADES.map(g=>`<button onclick="toggleFilt('${g.label}')" style="padding:3px 9px;border-radius:13px;border:1.5px solid ${g.color};background:${S.filt===g.label?g.color:'white'};color:${S.filt===g.label?'white':g.color};font-size:10px;font-weight:600;cursor:pointer">${g.label}</button>`).join('')}
@@ -756,10 +761,57 @@ function saveDw(){
 
 function onCSV(){
   const data=S.filt?S.saved.filter(r=>grd(r.score.total).label===S.filt):S.saved;
-  const h=['이름','생년월일','궁합점수','궁합구분','메모'];
-  const rows=data.map(r=>[r.name,fmtDate(r.date),r.score.total,grd(r.score.total).label,(r.memo||'').replace(/"/g,'""')]);
+  const h=['궁합구분','점수','이름','생년월일','일간','일지','월간','월지','연간','연지','시간','시지','대운천간','대운지지','세운26천간','세운26지지','세운27천간','세운27지지','메모'];
+  const rows=data.map(r=>[
+    grd(r.score.total).label, r.score.total,
+    r.name, fmtDate(r.date),
+    r.일간||'', r.일지||'', r.월간||'', r.월지||'', r.연간||'', r.연지||'', r.시간||'', r.시지||'',
+    r.dw_g_ss||'', r.dw_b_ss||'', r.s6_g_ss||'', r.s6_b_ss||'', r.s7_g_ss||'', r.s7_b_ss||'',
+    (r.memo||'').replace(/"/g,'""')
+  ]);
   const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);a.download='사주궁합.csv';a.click();
+}
+
+function onImportCSV(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    try{
+      const lines=ev.target.result.split('\n').map(l=>l.trim()).filter(Boolean);
+      if(lines.length<2){alert('데이터가 없습니다');return;}
+      const parse=line=>{const r=[];let cur='',inQ=false;for(const c of line){if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){r.push(cur);cur='';}else cur+=c;}r.push(cur);return r.map(s=>s.replace(/^"|"$/g,'').replace(/""/g,'"'));};
+      const hdr=parse(lines[0]);
+      const idx=k=>hdr.indexOf(k);
+      const imported=lines.slice(1).map((line,i)=>{
+        const cols=parse(line);
+        const get=k=>cols[idx(k)]||'';
+        const dateRaw=get('생년월일').replace(/\D/g,'');
+        const rec={
+          id: Date.now()+i,
+          name: get('이름')||'무명',
+          date: dateRaw,
+          일간:get('일간'),일지:get('일지'),월간:get('월간'),월지:get('월지'),
+          연간:get('연간'),연지:get('연지'),시간:get('시간'),시지:get('시지'),
+          dw_g_ss:get('대운천간'),dw_b_ss:get('대운지지'),
+          s6_g_ss:get('세운26천간'),s6_b_ss:get('세운26지지'),
+          s7_g_ss:get('세운27천간'),s7_b_ss:get('세운27지지'),
+          t_ilgan:'', memo:get('메모'),
+        };
+        return{...rec,score:calcScore(rec)};
+      });
+      // 기존 데이터와 병합 (이름+생년월일 기준 중복 제거, 업로드 우선)
+      const key=r=>`${r.name}_${r.date}`;
+      const map=new Map(S.saved.map(r=>[key(r),r]));
+      imported.forEach(r=>map.set(key(r),r));
+      S.saved=[...map.values()];
+      await window.persist();
+      alert(`✅ ${imported.length}건 업로드 완료 (중복 시 덮어쓰기)`);
+      renderContent();
+    }catch(err){alert('파일 파싱 오류: '+err.message);}
+    e.target.value='';
+  };
+  reader.readAsText(file,'UTF-8');
 }
 
 // ── 앱 시작 (모듈 로드 완료 대기) ────────────────────────────────────────────
